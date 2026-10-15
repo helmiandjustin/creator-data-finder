@@ -1,0 +1,24 @@
+export type Creator = {
+  itemId: string;
+  date: string;
+  creatorId: string;
+  tiktok: string;
+  email: string;
+  normalizedEmail: string;
+  normalizedTiktok: string;
+};
+
+export type BatchRow = {
+  input: string;
+  status: 'Found' | 'Not Found' | 'Duplicate Input' | 'Multiple Matches' | 'Invalid Input' | 'Error';
+  record?: Creator;
+  matches: Creator[];
+  error?: string;
+};
+
+export type CreatorInput = {
+  date: string;
+  creatorId: string;
+  tiktok: string;
+  email: string;
+};
