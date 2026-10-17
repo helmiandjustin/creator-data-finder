@@ -5,6 +5,7 @@ export type SearchField = 'Creator ID' | 'Email' | 'TikTok URL' | 'TikTok userna
 
 export const normalizeEmail = (value: string) => value.trim().toLowerCase();
 export const normalizeTikTok = (value: string) => value.trim().toLowerCase().replace(/^https?:\/\/(www\.)?tiktok\.com\//, '').replace(/^@/, '').split(/[/?#]/)[0];
+const normalizeDate = (value: string) => { const trimmed = value.trim(); const match = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/); return match ? `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}` : trimmed; };
 export const detect = (value: string): Exclude<SearchField, 'Auto Detect'> | 'Invalid' => {
   if (/^\d{2,}$/.test(value)) return 'Creator ID';
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Email';
@@ -29,7 +30,13 @@ export class CloudSearch {
     const query = type === 'Creator ID' ? db.from('creators').select('*').eq(column, normalized).limit(100) : db.from('creators').select('*').ilike(column, `${normalized}%`).limit(100);
     const { data, error } = await query;
     if (error) throw error;
-    return (data as DbCreator[]).map(map);
+    const primary = (data as DbCreator[]).map(map);
+    if (primary.length || type === 'Creator ID') return primary;
+    const fallbackColumn = type === 'Email' ? 'email' : 'tiktok_link';
+    const fallbackValue = type === 'Email' ? input : `@${normalized}`;
+    const fallback = await db.from('creators').select('*').ilike(fallbackColumn, type === 'Email' ? `${fallbackValue}%` : `%${fallbackValue}%`).limit(100);
+    if (fallback.error) throw fallback.error;
+    return [...primary, ...(fallback.data as DbCreator[]).map(map)].filter((record, index, records) => records.findIndex(item => item.itemId === record.itemId) === index);
   }
 
   async batch(values: string[], field: SearchField, onProgress: (done: number, found: number) => void): Promise<BatchRow[]> {
@@ -63,7 +70,7 @@ export class CloudSearch {
   }
 }
 
-export const toDb = (row: CreatorInput) => { const tiktok = row.tiktok.trim(); const link = tiktok && !/^https?:\/\//i.test(tiktok) ? `https://www.tiktok.com/@${tiktok.replace(/^@/, '')}` : tiktok; return { record_date: row.date || null, creator_id: row.creatorId.trim() || null, tiktok_link: link || null, email: row.email.trim() || null, normalized_email: normalizeEmail(row.email) || null, normalized_tiktok: normalizeTikTok(tiktok) || null }; };
+export const toDb = (row: CreatorInput) => { const tiktok = row.tiktok.trim(); const link = tiktok && !/^https?:\/\//i.test(tiktok) ? `https://www.tiktok.com/@${tiktok.replace(/^@/, '')}` : tiktok; return { record_date: normalizeDate(row.date) || null, creator_id: row.creatorId.trim() || null, tiktok_link: link || null, email: row.email.trim() || null, normalized_email: normalizeEmail(row.email) || null, normalized_tiktok: normalizeTikTok(tiktok) || null }; };
 
 async function removeDuplicates(rows: CreatorInput[]) {
   const candidates = rows.map(toDb);
@@ -122,12 +129,17 @@ export async function getRecordStats(): Promise<RecordStats> {
   const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const start = localIsoDate(previousMonthStart);
   const total = await countCreators();
-  const { data, error } = await client().from('creators').select('record_date').gte('record_date', start);
-  if (error) throw error;
   const currentStart = localIsoDate(monthStart);
   const nextMonthStart = localIsoDate(new Date(now.getFullYear(), now.getMonth() + 1, 1));
   const previousStart = localIsoDate(previousMonthStart);
-  const dates = (data as Array<{ record_date: string | null }>).map(row => row.record_date).filter((date): date is string => Boolean(date));
+  const dates: string[] = [];
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await client().from('creators').select('record_date').gte('record_date', start).range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    dates.push(...(data as Array<{ record_date: string | null }>).map(row => row.record_date).filter((date): date is string => Boolean(date)));
+    if (data.length < pageSize) break;
+  }
   const currentMonth = dates.filter(date => date >= currentStart && date < nextMonthStart).length;
   const previousMonth = dates.filter(date => date >= previousStart && date < currentStart).length;
   const daily = dates.filter(date => date >= currentStart && date < nextMonthStart).reduce<Record<string, number>>((result, date) => { result[date] = (result[date] ?? 0) + 1; return result; }, {});
