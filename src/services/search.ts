@@ -135,7 +135,7 @@ export async function getRecordStats(): Promise<RecordStats> {
   const dates: string[] = [];
   const pageSize = 1000;
   for (let offset = 0; ; offset += pageSize) {
-    const { data, error } = await client().from('creators').select('record_date').gte('record_date', start).range(offset, offset + pageSize - 1);
+    const { data, error } = await client().from('creators').select('record_date').gte('record_date', start).order('id', { ascending: true }).range(offset, offset + pageSize - 1);
     if (error) throw error;
     dates.push(...(data as Array<{ record_date: string | null }>).map(row => row.record_date).filter((date): date is string => Boolean(date)));
     if (data.length < pageSize) break;
