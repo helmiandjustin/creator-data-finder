@@ -124,6 +124,11 @@ export async function deleteAllCreators() { const { data, error } = await client
 export type RecordStats = { total: number; currentMonth: number; previousMonth: number; daily: Array<{ date: string; count: number }> };
 const localIsoDate = (date: Date) => { const year = date.getFullYear(); const month = String(date.getMonth() + 1).padStart(2, '0'); const day = String(date.getDate()).padStart(2, '0'); return `${year}-${month}-${day}`; };
 export async function getRecordStats(): Promise<RecordStats> {
+  const rpc = await client().rpc('get_creator_stats');
+  if (!rpc.error && rpc.data) {
+    const value = rpc.data as { total?: number; current_month?: number; previous_month?: number; daily?: Array<{ date: string; count: number }> };
+    return { total: Number(value.total ?? 0), currentMonth: Number(value.current_month ?? 0), previousMonth: Number(value.previous_month ?? 0), daily: value.daily ?? [] };
+  }
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
