@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { normalizeEmail, normalizeTikTok } from './search';
+import type { BatchRow, Creator } from '../types';
 
 export type CatalogBrand = { name: string; aliases: string[]; products: string[] };
 export type Catalog = { brands: CatalogBrand[] };
@@ -66,6 +67,26 @@ export async function importHijackReplies(input: string) {
     if (updateError) throw updateError;
   }
   return { imported: emails.length, matched: matchedEmails.size, unknown: emails.filter(email => !matchedEmails.has(email)).length };
+}
+
+export async function matchReplyEmails(input: string) {
+  const emails = [...new Set(input.split(/\r?\n|,|;/).map(value => normalizeEmail(value)).filter(Boolean))];
+  if (!emails.length) return { rows: [] as BatchRow[], imported: 0, matched: 0, unknown: 0 };
+  const db = client();
+  const [creators, hijack] = await Promise.all([
+    db.from('creators').select('*').in('normalized_email', emails),
+    db.from('hijack_records').select('*').in('normalized_email', emails)
+  ]);
+  if (creators.error) throw creators.error;
+  if (hijack.error) throw hijack.error;
+  const creatorRows = (creators.data ?? []).map(row => ({ itemId: String(row.id), date: row.record_date ?? '', creatorId: row.creator_id ?? '', tiktok: row.tiktok_link ?? '', email: row.email ?? '', normalizedEmail: row.normalized_email ?? '', normalizedTiktok: row.normalized_tiktok ?? '' } as Creator));
+  const hijackRows = (hijack.data ?? []).map(row => ({ itemId: `hijack-${row.id}`, date: row.record_date ?? '', creatorId: '', tiktok: row.tiktok_link ?? '', email: row.email ?? '', normalizedEmail: row.normalized_email ?? '', normalizedTiktok: row.normalized_tiktok ?? '' } as Creator));
+  const byEmail = new Map<string, Creator[]>();
+  [...creatorRows, ...hijackRows].forEach(row => byEmail.set(row.normalizedEmail, [...(byEmail.get(row.normalizedEmail) ?? []), row]));
+  const rows: BatchRow[] = emails.map(inputEmail => { const matches = byEmail.get(inputEmail) ?? []; return { input: inputEmail, status: matches.length ? 'Found' : 'Not Found', matches, record: matches[0] }; });
+  const matchedEmails = emails.filter(email => (byEmail.get(email) ?? []).length);
+  if (matchedEmails.length) { const result = await db.from('hijack_records').update({ replied_at: new Date().toISOString() }).in('normalized_email', matchedEmails); if (result.error) throw result.error; }
+  return { rows, imported: emails.length, matched: matchedEmails.length, unknown: emails.length - matchedEmails.length };
 }
 
 export async function getHijackStats(): Promise<HijackStats> {
