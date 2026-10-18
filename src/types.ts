@@ -13,6 +13,7 @@ export type BatchRow = {
   status: 'Found' | 'Not Found' | 'Duplicate Input' | 'Multiple Matches' | 'Invalid Input' | 'Error';
   record?: Creator;
   matches: Creator[];
+  campaigns?: string[];
   error?: string;
 };
 

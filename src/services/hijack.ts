@@ -82,9 +82,11 @@ export async function matchReplyEmails(input: string) {
   if (hijack.error) throw hijack.error;
   const creatorRows = (creators.data ?? []).map(row => ({ itemId: String(row.id), date: row.record_date ?? '', creatorId: row.creator_id ?? '', tiktok: row.tiktok_link ?? '', email: row.email ?? '', normalizedEmail: row.normalized_email ?? '', normalizedTiktok: row.normalized_tiktok ?? '' } as Creator));
   const hijackRows = (hijack.data ?? []).map(row => ({ itemId: `hijack-${row.id}`, date: row.record_date ?? '', creatorId: '', tiktok: row.tiktok_link ?? '', email: row.email ?? '', normalizedEmail: row.normalized_email ?? '', normalizedTiktok: row.normalized_tiktok ?? '' } as Creator));
+  const campaignsByEmail = new Map<string, string[]>();
+  (hijack.data ?? []).forEach(row => { if (row.normalized_email) campaignsByEmail.set(row.normalized_email, [...(campaignsByEmail.get(row.normalized_email) ?? []), `${row.scope}: ${row.target}`]); });
   const byEmail = new Map<string, Creator[]>();
   [...creatorRows, ...hijackRows].forEach(row => byEmail.set(row.normalizedEmail, [...(byEmail.get(row.normalizedEmail) ?? []), row]));
-  const rows: BatchRow[] = emails.map(inputEmail => { const matches = byEmail.get(inputEmail) ?? []; return { input: inputEmail, status: matches.length ? 'Found' : 'Not Found', matches, record: matches[0] }; });
+  const rows: BatchRow[] = emails.map(inputEmail => { const matches = byEmail.get(inputEmail) ?? []; return { input: inputEmail, status: matches.length ? 'Found' : 'Not Found', matches, record: matches[0], campaigns: [...new Set(campaignsByEmail.get(inputEmail) ?? [])] }; });
   const matchedEmails = emails.filter(email => (byEmail.get(email) ?? []).length);
   if (matchedEmails.length) { const result = await db.from('hijack_records').update({ replied_at: new Date().toISOString() }).in('normalized_email', matchedEmails); if (result.error) throw result.error; }
   return { rows, imported: emails.length, matched: matchedEmails.length, unknown: emails.length - matchedEmails.length };
