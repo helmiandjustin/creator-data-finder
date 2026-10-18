@@ -6,6 +6,7 @@ export type CatalogBrand = { name: string; aliases: string[]; products: string[]
 export type Catalog = { brands: CatalogBrand[] };
 export type HijackInput = { date: string; tiktok: string; email: string };
 export type HijackStats = { total: number; matchedReplies: number; unknownReplies: number; byBrand: Array<{ target: string; total: number; replies: number }>; byProduct: Array<{ target: string; total: number; replies: number }> };
+export type DailyCounts = { date: string; listing: number; hijack: number };
 
 const client = () => { if (!supabase) throw new Error('Supabase belum dikonfigurasi.'); return supabase; };
 const cleanDate = (value: string) => { const match = value.trim().match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/); return match ? `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}` : value.trim() || null; };
@@ -93,4 +94,15 @@ export async function getHijackStats(): Promise<HijackStats> {
   const { data, error } = await client().rpc('get_hijack_stats');
   if (error) throw error;
   return data as HijackStats;
+}
+
+export async function getDailyCounts(date: string): Promise<DailyCounts> {
+  const db = client();
+  const [listing, hijack] = await Promise.all([
+    db.from('creators').select('id', { count: 'exact', head: true }).eq('record_date', date),
+    db.from('hijack_records').select('id', { count: 'exact', head: true }).eq('record_date', date)
+  ]);
+  if (listing.error) throw listing.error;
+  if (hijack.error) throw hijack.error;
+  return { date, listing: listing.count ?? 0, hijack: hijack.count ?? 0 };
 }
