@@ -7,6 +7,7 @@ export type Catalog = { brands: CatalogBrand[] };
 export type HijackInput = { date: string; tiktok: string; email: string };
 export type HijackStats = { total: number; matchedReplies: number; unknownReplies: number; byBrand: Array<{ target: string; total: number; replies: number }>; byProduct: Array<{ target: string; total: number; replies: number }> };
 export type DailyCounts = { date: string; listing: number; hijack: number };
+export type MonthlyCounts = { month: string; listing: number; hijack: number };
 
 const client = () => { if (!supabase) throw new Error('Supabase belum dikonfigurasi.'); return supabase; };
 const cleanDate = (value: string) => { const match = value.trim().match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/); return match ? `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}` : value.trim() || null; };
@@ -107,4 +108,19 @@ export async function getDailyCounts(date: string): Promise<DailyCounts> {
   if (listing.error) throw listing.error;
   if (hijack.error) throw hijack.error;
   return { date, listing: listing.count ?? 0, hijack: hijack.count ?? 0 };
+}
+
+export async function getMonthlyCounts(month: string): Promise<MonthlyCounts> {
+  const db = client();
+  const [year, monthNumber] = month.split('-').map(Number);
+  if (!year || !monthNumber) return { month, listing: 0, hijack: 0 };
+  const start = `${month}-01`;
+  const next = monthNumber === 12 ? `${year + 1}-01-01` : `${year}-${String(monthNumber + 1).padStart(2, '0')}-01`;
+  const [listing, hijack] = await Promise.all([
+    db.from('creators').select('id', { count: 'exact', head: true }).gte('record_date', start).lt('record_date', next),
+    db.from('hijack_records').select('id', { count: 'exact', head: true }).gte('record_date', start).lt('record_date', next)
+  ]);
+  if (listing.error) throw listing.error;
+  if (hijack.error) throw hijack.error;
+  return { month, listing: listing.count ?? 0, hijack: hijack.count ?? 0 };
 }
