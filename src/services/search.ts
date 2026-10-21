@@ -1,13 +1,12 @@
 import type { BatchRow, Creator, CreatorInput } from '../types';
 import { supabase } from '../lib/supabase';
 
-export type SearchField = 'Creator ID' | 'Email' | 'TikTok URL' | 'TikTok username' | 'Auto Detect';
+export type SearchField = 'Email' | 'TikTok URL' | 'TikTok username' | 'Auto Detect';
 
 export const normalizeEmail = (value: string) => value.trim().toLowerCase();
 export const normalizeTikTok = (value: string) => value.trim().toLowerCase().replace(/^https?:\/\/(www\.)?tiktok\.com\//, '').replace(/^@/, '').split(/[/?#]/)[0];
 const normalizeDate = (value: string) => { const trimmed = value.trim(); const match = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/); return match ? `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}` : trimmed; };
 export const detect = (value: string): Exclude<SearchField, 'Auto Detect'> | 'Invalid' => {
-  if (/^\d{2,}$/.test(value)) return 'Creator ID';
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Email';
   if (/tiktok\.com/i.test(value)) return 'TikTok URL';
   if (/^@?[a-zA-Z0-9._-]{2,}$/.test(value)) return 'TikTok username';
@@ -18,6 +17,16 @@ type DbCreator = { id: number; record_date: string | null; creator_id: string | 
 const map = (row: DbCreator): Creator => ({ itemId: String(row.id), date: row.record_date ?? '', creatorId: row.creator_id ?? '', tiktok: row.tiktok_link ?? '', email: row.email ?? '', normalizedEmail: row.normalized_email ?? normalizeEmail(row.email ?? ''), normalizedTiktok: row.normalized_tiktok ?? normalizeTikTok(row.tiktok_link ?? '') });
 type DbHijack = DbCreator & { scope: string | null; target: string | null };
 const mapHijack = (row: DbHijack): Creator => ({ ...map(row), itemId: `hijack-${row.id}`, campaigns: [`${row.scope ?? 'Campaign'}: ${row.target ?? '—'}`] });
+const mergeRecords = (records: Creator[]) => [...records.reduce((merged, record) => {
+  const key = record.normalizedEmail || record.normalizedTiktok || record.itemId;
+  const existing = merged.get(key);
+  if (!existing) return merged.set(key, { ...record });
+  existing.date ||= record.date;
+  existing.tiktok ||= record.tiktok;
+  existing.email ||= record.email;
+  existing.campaigns = [...new Set([...(existing.campaigns ?? []), ...(record.campaigns ?? [])])];
+  return merged;
+}, new Map<string, Creator>()).values()];
 const client = () => { if (!supabase) throw new Error('Supabase belum dikonfigurasi. Isi .env.local lalu restart aplikasi.'); return supabase; };
 export const errorText = (error: unknown) => { if (typeof error === 'object' && error !== null) { const value = error as { message?: string; code?: string; details?: string; hint?: string }; return [value.message, value.code && `Code: ${value.code}`, value.details, value.hint && `Hint: ${value.hint}`].filter(Boolean).join(' · '); } return error instanceof Error ? error.message : String(error); };
 
@@ -27,15 +36,15 @@ export class CloudSearch {
     const type = detect(input);
     if (type === 'Invalid') return [];
     const db = client();
-    const column = type === 'Email' ? 'normalized_email' : type === 'Creator ID' ? 'creator_id' : 'normalized_tiktok';
-    const normalized = type === 'Email' ? normalizeEmail(input) : type === 'Creator ID' ? input : normalizeTikTok(input);
-    const creatorQuery = type === 'Creator ID' ? db.from('creators').select('*').eq(column, normalized).limit(100) : db.from('creators').select('*').ilike(column, `${normalized}%`).limit(100);
-    const hijackQuery = type === 'Creator ID' ? Promise.resolve({ data: [], error: null }) : db.from('hijack_records').select('*').ilike(column, `${normalized}%`).limit(100);
+    const column = type === 'Email' ? 'normalized_email' : 'normalized_tiktok';
+    const normalized = type === 'Email' ? normalizeEmail(input) : normalizeTikTok(input);
+    const creatorQuery = db.from('creators').select('*').ilike(column, `${normalized}%`).limit(100);
+    const hijackQuery = db.from('hijack_records').select('*').ilike(column, `${normalized}%`).limit(100);
     const [creatorResult, hijackResult] = await Promise.all([creatorQuery, hijackQuery]);
     if (creatorResult.error) throw creatorResult.error;
     if (hijackResult.error) throw hijackResult.error;
-    const primary = [...(creatorResult.data as DbCreator[]).map(map), ...(hijackResult.data as DbHijack[]).map(mapHijack)];
-    if (primary.length || type === 'Creator ID') return primary;
+    const primary = mergeRecords([...(creatorResult.data as DbCreator[]).map(map), ...(hijackResult.data as DbHijack[]).map(mapHijack)]);
+    if (primary.length) return primary;
     const fallbackColumn = type === 'Email' ? 'email' : 'tiktok_link';
     const fallbackValue = type === 'Email' ? input : `@${normalized}`;
     const fallback = await db.from('creators').select('*').ilike(fallbackColumn, type === 'Email' ? `${fallbackValue}%` : `%${fallbackValue}%`).limit(100);
@@ -53,16 +62,16 @@ export class CloudSearch {
     for (const [type, all] of groups) {
       for (let i = 0; i < all.length; i += 100) {
         const chunk = [...new Set(all.slice(i, i + 100))];
-        const column = type === 'Email' ? 'normalized_email' : type === 'Creator ID' ? 'creator_id' : 'normalized_tiktok';
-        const normalized = type === 'Email' ? chunk.map(normalizeEmail) : type === 'Creator ID' ? chunk : chunk.map(normalizeTikTok);
+        const column = type === 'Email' ? 'normalized_email' : 'normalized_tiktok';
+        const normalized = type === 'Email' ? chunk.map(normalizeEmail) : chunk.map(normalizeTikTok);
         const db = client();
-        const [creatorResult, hijackResult] = await Promise.all([db.from('creators').select('*').in(column, normalized), type === 'Creator ID' ? Promise.resolve({ data: [], error: null }) : db.from('hijack_records').select('*').in(column, normalized)]);
+        const [creatorResult, hijackResult] = await Promise.all([db.from('creators').select('*').in(column, normalized), db.from('hijack_records').select('*').in(column, normalized)]);
         if (creatorResult.error) throw creatorResult.error;
         if (hijackResult.error) throw hijackResult.error;
         const data = [...(creatorResult.data as DbCreator[]).map(map), ...(hijackResult.data as DbHijack[]).map(mapHijack)];
         for (const value of chunk) {
-          const key = type === 'Email' ? normalizeEmail(value) : type === 'Creator ID' ? value : normalizeTikTok(value);
-          matches.set(value, data.filter(row => (row[type === 'Email' ? 'normalizedEmail' : type === 'Creator ID' ? 'creatorId' : 'normalizedTiktok'] ?? '') === key));
+          const key = type === 'Email' ? normalizeEmail(value) : normalizeTikTok(value);
+          matches.set(value, mergeRecords(data.filter(row => (row[type === 'Email' ? 'normalizedEmail' : 'normalizedTiktok'] ?? '') === key)));
         }
         done += chunk.length;
         onProgress(done, [...matches.values()].flat().length);
