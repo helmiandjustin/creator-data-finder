@@ -16,6 +16,8 @@ export const detect = (value: string): Exclude<SearchField, 'Auto Detect'> | 'In
 
 type DbCreator = { id: number; record_date: string | null; creator_id: string | null; tiktok_link: string | null; email: string | null; normalized_email: string | null; normalized_tiktok: string | null };
 const map = (row: DbCreator): Creator => ({ itemId: String(row.id), date: row.record_date ?? '', creatorId: row.creator_id ?? '', tiktok: row.tiktok_link ?? '', email: row.email ?? '', normalizedEmail: row.normalized_email ?? normalizeEmail(row.email ?? ''), normalizedTiktok: row.normalized_tiktok ?? normalizeTikTok(row.tiktok_link ?? '') });
+type DbHijack = DbCreator & { scope: string | null; target: string | null };
+const mapHijack = (row: DbHijack): Creator => ({ ...map(row), itemId: `hijack-${row.id}`, campaigns: [`${row.scope ?? 'Campaign'}: ${row.target ?? '—'}`] });
 const client = () => { if (!supabase) throw new Error('Supabase belum dikonfigurasi. Isi .env.local lalu restart aplikasi.'); return supabase; };
 export const errorText = (error: unknown) => { if (typeof error === 'object' && error !== null) { const value = error as { message?: string; code?: string; details?: string; hint?: string }; return [value.message, value.code && `Code: ${value.code}`, value.details, value.hint && `Hint: ${value.hint}`].filter(Boolean).join(' · '); } return error instanceof Error ? error.message : String(error); };
 
@@ -27,10 +29,12 @@ export class CloudSearch {
     const db = client();
     const column = type === 'Email' ? 'normalized_email' : type === 'Creator ID' ? 'creator_id' : 'normalized_tiktok';
     const normalized = type === 'Email' ? normalizeEmail(input) : type === 'Creator ID' ? input : normalizeTikTok(input);
-    const query = type === 'Creator ID' ? db.from('creators').select('*').eq(column, normalized).limit(100) : db.from('creators').select('*').ilike(column, `${normalized}%`).limit(100);
-    const { data, error } = await query;
-    if (error) throw error;
-    const primary = (data as DbCreator[]).map(map);
+    const creatorQuery = type === 'Creator ID' ? db.from('creators').select('*').eq(column, normalized).limit(100) : db.from('creators').select('*').ilike(column, `${normalized}%`).limit(100);
+    const hijackQuery = type === 'Creator ID' ? Promise.resolve({ data: [], error: null }) : db.from('hijack_records').select('*').ilike(column, `${normalized}%`).limit(100);
+    const [creatorResult, hijackResult] = await Promise.all([creatorQuery, hijackQuery]);
+    if (creatorResult.error) throw creatorResult.error;
+    if (hijackResult.error) throw hijackResult.error;
+    const primary = [...(creatorResult.data as DbCreator[]).map(map), ...(hijackResult.data as DbHijack[]).map(mapHijack)];
     if (primary.length || type === 'Creator ID') return primary;
     const fallbackColumn = type === 'Email' ? 'email' : 'tiktok_link';
     const fallbackValue = type === 'Email' ? input : `@${normalized}`;
@@ -51,11 +55,14 @@ export class CloudSearch {
         const chunk = [...new Set(all.slice(i, i + 100))];
         const column = type === 'Email' ? 'normalized_email' : type === 'Creator ID' ? 'creator_id' : 'normalized_tiktok';
         const normalized = type === 'Email' ? chunk.map(normalizeEmail) : type === 'Creator ID' ? chunk : chunk.map(normalizeTikTok);
-        const { data, error } = await client().from('creators').select('*').in(column, normalized);
-        if (error) throw error;
+        const db = client();
+        const [creatorResult, hijackResult] = await Promise.all([db.from('creators').select('*').in(column, normalized), type === 'Creator ID' ? Promise.resolve({ data: [], error: null }) : db.from('hijack_records').select('*').in(column, normalized)]);
+        if (creatorResult.error) throw creatorResult.error;
+        if (hijackResult.error) throw hijackResult.error;
+        const data = [...(creatorResult.data as DbCreator[]).map(map), ...(hijackResult.data as DbHijack[]).map(mapHijack)];
         for (const value of chunk) {
           const key = type === 'Email' ? normalizeEmail(value) : type === 'Creator ID' ? value : normalizeTikTok(value);
-          matches.set(value, (data as DbCreator[]).filter(row => (row[column as keyof DbCreator] ?? '') === key).map(map));
+          matches.set(value, data.filter(row => (row[type === 'Email' ? 'normalizedEmail' : type === 'Creator ID' ? 'creatorId' : 'normalizedTiktok'] ?? '') === key));
         }
         done += chunk.length;
         onProgress(done, [...matches.values()].flat().length);
@@ -65,7 +72,7 @@ export class CloudSearch {
       if (row.type === 'Invalid') return { input: row.input, status: 'Invalid Input', matches: [] };
       const found = matches.get(row.value) ?? [];
       if (rows.filter(other => other.value === row.value).length > 1) return { input: row.input, status: 'Duplicate Input', matches: found, record: found[0] };
-      return { input: row.input, status: found.length === 0 ? 'Not Found' : found.length === 1 ? 'Found' : 'Multiple Matches', matches: found, record: found[0] };
+      return { input: row.input, status: found.length === 0 ? 'Not Found' : found.length === 1 ? 'Found' : 'Multiple Matches', matches: found, record: found[0], campaigns: [...new Set(found.flatMap(match => match.campaigns ?? []))] };
     });
   }
 }

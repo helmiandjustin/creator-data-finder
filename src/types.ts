@@ -6,6 +6,7 @@ export type Creator = {
   email: string;
   normalizedEmail: string;
   normalizedTiktok: string;
+  campaigns?: string[];
 };
 
 export type BatchRow = {
