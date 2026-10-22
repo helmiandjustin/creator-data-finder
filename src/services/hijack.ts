@@ -93,6 +93,61 @@ export async function matchReplyEmails(input: string) {
   return { rows, imported: emails.length, matched: matchedEmails.length, unknown: emails.length - matchedEmails.length };
 }
 
+export async function matchHijackInputs(input: string) {
+  const inputs = [...new Set(input.split(/\r?\n|,|;/).map(value => value.trim()).filter(Boolean))];
+  if (!inputs.length) return { rows: [] as BatchRow[], imported: 0, matched: 0, unknown: 0 };
+  const emails = inputs.filter(value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)).map(normalizeEmail);
+  const tiktoks = inputs.filter(value => !emails.includes(normalizeEmail(value))).map(normalizeTikTok).filter(Boolean);
+  const db = client();
+  const [emailResult, tiktokResult, masterEmailResult, masterTiktokResult] = await Promise.all([
+    emails.length ? db.from('hijack_records').select('*').in('normalized_email', emails) : Promise.resolve({ data: [], error: null }),
+    tiktoks.length ? db.from('hijack_records').select('*').in('normalized_tiktok', tiktoks) : Promise.resolve({ data: [], error: null }),
+    emails.length ? db.from('creators').select('*').in('normalized_email', emails) : Promise.resolve({ data: [], error: null }),
+    tiktoks.length ? db.from('creators').select('*').in('normalized_tiktok', tiktoks) : Promise.resolve({ data: [], error: null })
+  ]);
+  if (emailResult.error) throw emailResult.error;
+  if (tiktokResult.error) throw tiktokResult.error;
+  if (masterEmailResult.error) throw masterEmailResult.error;
+  if (masterTiktokResult.error) throw masterTiktokResult.error;
+  const masterRecords = [...(masterEmailResult.data ?? []), ...(masterTiktokResult.data ?? [])];
+  const masterEmails = [...new Set(masterRecords.map(row => row.normalized_email).filter(Boolean))];
+  const bridgedResult = masterEmails.length ? await db.from('hijack_records').select('*').in('normalized_email', masterEmails) : { data: [], error: null };
+  if (bridgedResult.error) throw bridgedResult.error;
+  const records = [...(emailResult.data ?? []), ...(tiktokResult.data ?? []), ...(bridgedResult.data ?? [])];
+  const byInput = new Map<string, Creator[]>();
+  records.forEach(row => {
+    const record = { itemId: `hijack-${row.id}`, date: row.record_date ?? '', creatorId: '', tiktok: row.tiktok_link ?? '', email: row.email ?? '', normalizedEmail: row.normalized_email ?? '', normalizedTiktok: row.normalized_tiktok ?? '', campaigns: [`${row.scope}: ${row.target}`] } as Creator;
+    const keys = [record.normalizedEmail, record.normalizedTiktok].filter(Boolean);
+    keys.forEach(key => byInput.set(key, [...(byInput.get(key) ?? []), record]));
+  });
+  const masterByKey = new Map<string, Creator>();
+  masterRecords.forEach(row => {
+    const record = { itemId: String(row.id), date: row.record_date ?? '', creatorId: row.creator_id ?? '', tiktok: row.tiktok_link ?? '', email: row.email ?? '', normalizedEmail: row.normalized_email ?? '', normalizedTiktok: row.normalized_tiktok ?? '' } as Creator;
+    [record.normalizedEmail, record.normalizedTiktok].filter(Boolean).forEach(key => masterByKey.set(key, record));
+  });
+  masterRecords.forEach(row => {
+    const master = masterByKey.get(row.normalized_email ?? '') ?? masterByKey.get(row.normalized_tiktok ?? '');
+    if (!master) return;
+    const linked = records.filter(record => record.normalized_email === master.normalizedEmail).map(record => ({ itemId: `hijack-${record.id}`, date: record.record_date ?? '', creatorId: master.creatorId, tiktok: record.tiktok_link || master.tiktok, email: record.email || master.email, normalizedEmail: record.normalized_email || master.normalizedEmail, normalizedTiktok: record.normalized_tiktok || master.normalizedTiktok, campaigns: [`${record.scope}: ${record.target}`] } as Creator));
+    const keys = [master.normalizedEmail, master.normalizedTiktok].filter(Boolean) as string[];
+    keys.forEach(key => byInput.set(key, [...(byInput.get(key) ?? []), ...linked]));
+  });
+  const rows = inputs.map(inputValue => {
+    const key = emails.includes(normalizeEmail(inputValue)) ? normalizeEmail(inputValue) : normalizeTikTok(inputValue);
+    const matches = [...new Map((byInput.get(key) ?? []).map(row => [row.itemId, row])).values()].map(row => {
+      const master = masterByKey.get(row.normalizedEmail) ?? masterByKey.get(row.normalizedTiktok);
+      return master ? { ...master, ...row, date: row.date || master.date, tiktok: row.tiktok || master.tiktok, email: row.email || master.email, campaigns: row.campaigns } : row;
+    });
+    return { input: inputValue, status: matches.length === 0 ? 'Not Found' : matches.length === 1 ? 'Found' : 'Multiple Matches', matches, record: matches[0], campaigns: [...new Set(matches.flatMap(row => row.campaigns ?? []))] } as BatchRow;
+  });
+  const matchedEmails = emails.filter(email => (byInput.get(email) ?? []).length);
+  if (matchedEmails.length) {
+    const result = await db.from('hijack_records').update({ replied_at: new Date().toISOString() }).in('normalized_email', matchedEmails);
+    if (result.error) throw result.error;
+  }
+  return { rows, imported: inputs.length, matched: rows.filter(row => row.status !== 'Not Found').length, unknown: rows.filter(row => row.status === 'Not Found').length };
+}
+
 export async function getHijackStats(): Promise<HijackStats> {
   const { data, error } = await client().rpc('get_hijack_stats');
   if (error) throw error;
