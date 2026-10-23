@@ -140,9 +140,9 @@ export async function matchHijackInputs(input: string) {
     });
     return { input: inputValue, status: matches.length === 0 ? 'Not Found' : matches.length === 1 ? 'Found' : 'Multiple Matches', matches, record: matches[0], campaigns: [...new Set(matches.flatMap(row => row.campaigns ?? []))] } as BatchRow;
   });
-  const matchedEmails = emails.filter(email => (byInput.get(email) ?? []).length);
-  if (matchedEmails.length) {
-    const result = await db.from('hijack_records').update({ replied_at: new Date().toISOString() }).in('normalized_email', matchedEmails);
+  const matchedIds = [...new Set(rows.flatMap(row => row.matches).map(row => row.itemId.replace(/^hijack-/, '')).filter(id => /^\d+$/.test(id)))];
+  if (matchedIds.length) {
+    const result = await db.from('hijack_records').update({ replied_at: new Date().toISOString() }).in('id', matchedIds);
     if (result.error) throw result.error;
   }
   return { rows, imported: inputs.length, matched: rows.filter(row => row.status !== 'Not Found').length, unknown: rows.filter(row => row.status === 'Not Found').length };
