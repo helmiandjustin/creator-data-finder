@@ -9,6 +9,7 @@ export type HijackStats = { total: number; matchedReplies: number; unknownReplie
 export type DailyCounts = { date: string; listing: number; hijack: number };
 export type MonthlyCounts = { month: string; listing: number; hijack: number };
 export type ActivityRow = { id: string; username: string; email: string; type: 'Listing' | 'Hijack'; campaign: string };
+export type ActivityResult = { rows: ActivityRow[]; counts: { listing: number; hijack: number } };
 
 const client = () => { if (!supabase) throw new Error('Supabase belum dikonfigurasi.'); return supabase; };
 const cleanDate = (value: string) => { const match = value.trim().match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/); return match ? `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}` : value.trim() || null; };
@@ -166,18 +167,19 @@ export async function getDailyCounts(date: string): Promise<DailyCounts> {
   return { date, listing: listing.count ?? 0, hijack: hijack.count ?? 0 };
 }
 
-export async function getActivity(date: string, type: 'Both' | 'Listing' | 'Hijack' = 'Both'): Promise<ActivityRow[]> {
+export async function getActivity(date: string, type: 'Both' | 'Listing' | 'Hijack' = 'Both'): Promise<ActivityResult> {
   const db = client();
-  const listingQuery = type === 'Hijack' ? Promise.resolve({ data: [], error: null }) : db.from('creators').select('id,record_date,tiktok_link,email').eq('record_date', date).order('id', { ascending: false }).limit(100);
-  const hijackQuery = type === 'Listing' ? Promise.resolve({ data: [], error: null }) : db.from('hijack_records').select('id,record_date,tiktok_link,email,scope,target').eq('record_date', date).order('id', { ascending: false }).limit(100);
+  const listingQuery = type === 'Hijack' ? Promise.resolve({ data: [], count: 0, error: null }) : db.from('creators').select('id,record_date,tiktok_link,email', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false }).limit(5);
+  const hijackQuery = type === 'Listing' ? Promise.resolve({ data: [], count: 0, error: null }) : db.from('hijack_records').select('id,record_date,tiktok_link,email,scope,target', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false }).limit(5);
   const [listing, hijack] = await Promise.all([listingQuery, hijackQuery]);
   if (listing.error) throw listing.error;
   if (hijack.error) throw hijack.error;
   const username = (value: string | null) => normalizeTikTok(value ?? '') || '—';
-  return [
+  const rows = [
     ...(listing.data ?? []).map(row => ({ id: `listing-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Listing' as const, campaign: 'Creator Finder' })),
     ...(hijack.data ?? []).map(row => ({ id: `hijack-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Hijack' as const, campaign: `${row.scope ?? 'Campaign'}: ${row.target ?? '—'}` }))
   ];
+  return { rows, counts: { listing: listing.count ?? 0, hijack: hijack.count ?? 0 } };
 }
 
 export async function getMonthlyCounts(month: string): Promise<MonthlyCounts> {
