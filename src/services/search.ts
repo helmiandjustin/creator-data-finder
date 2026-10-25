@@ -120,7 +120,7 @@ async function removeDuplicates(rows: CreatorInput[]) {
   return unique.filter(row => !existingEmails.has(row.normalized_email ?? '') && !existingTiktoks.has(row.normalized_tiktok ?? ''));
 }
 
-export type DuplicateCheckResult = { total: number; newCount: number; duplicateRows: number; listingExisting: number; hijackExisting: number; newUsernames: string[]; newEmails: string[] };
+export type DuplicateCheckResult = { total: number; newCount: number; duplicateRows: number; listingExisting: number; hijackExisting: number; newUsernames: string[]; newEmails: string[]; allUsernames: string[]; allEmails: string[] };
 export async function checkCreatorImport(rows: CreatorInput[]): Promise<DuplicateCheckResult> {
   const candidates = rows.map(toDb).filter(row => row.record_date || row.creator_id || row.tiktok_link || row.email);
   const seenEmails = new Set<string>(); const seenTiktoks = new Set<string>();
@@ -131,7 +131,7 @@ export async function checkCreatorImport(rows: CreatorInput[]): Promise<Duplicat
   const hijackExisting = unique.filter(row => hijackEmails.has(row.normalized_email ?? '') || hijackTiktoks.has(row.normalized_tiktok ?? '')).length;
   const existing = unique.filter(row => existingEmails.has(row.normalized_email ?? '') || existingTiktoks.has(row.normalized_tiktok ?? '') || hijackEmails.has(row.normalized_email ?? '') || hijackTiktoks.has(row.normalized_tiktok ?? '')).length;
   const newRows = unique.filter(row => !existingEmails.has(row.normalized_email ?? '') && !existingTiktoks.has(row.normalized_tiktok ?? '') && !hijackEmails.has(row.normalized_email ?? '') && !hijackTiktoks.has(row.normalized_tiktok ?? ''));
-  return { total: candidates.length, newCount: unique.length - existing, duplicateRows: candidates.length - unique.length, listingExisting, hijackExisting, newUsernames: newRows.map(row => row.normalized_tiktok).filter((value): value is string => Boolean(value)), newEmails: newRows.map(row => row.normalized_email).filter((value): value is string => Boolean(value)) };
+  return { total: candidates.length, newCount: unique.length - existing, duplicateRows: candidates.length - unique.length, listingExisting, hijackExisting, newUsernames: newRows.map(row => row.normalized_tiktok).filter((value): value is string => Boolean(value)), newEmails: newRows.map(row => row.normalized_email).filter((value): value is string => Boolean(value)), allUsernames: candidates.map(row => row.normalized_tiktok).filter((value): value is string => Boolean(value)), allEmails: candidates.map(row => row.normalized_email).filter((value): value is string => Boolean(value)) };
 }
 
 export async function insertCreators(rows: CreatorInput[], onProgress: (done: number) => void) {
