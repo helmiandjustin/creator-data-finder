@@ -151,8 +151,8 @@ export async function insertCreators(rows: CreatorInput[], onProgress: (done: nu
 
 export async function insertCreator(row: CreatorInput) { const inserted = await insertCreators([row], () => undefined); if (!inserted) throw new Error('Record duplikat: email atau username TikTok sudah ada.'); }
 export async function countCreators() { const { count, error } = await client().from('creators').select('id', { count: 'exact', head: true }); if (error) throw error; return count ?? 0; }
-export async function deleteCreatorsByDate(date: string) { const { data, error } = await client().from('creators').delete().eq('record_date', date).select('id'); if (error) throw error; return data?.length ?? 0; }
-export async function deleteAllCreators() { const { data, error } = await client().from('creators').delete().not('id', 'is', null).select('id'); if (error) throw error; return data?.length ?? 0; }
+export async function deleteCreatorsByDate(date: string) { const db = client(); const listing = await db.from('creators').delete().eq('record_date', date).select('id'); if (listing.error) throw listing.error; const hijack = await db.from('hijack_records').delete().eq('record_date', date).select('id'); if (hijack.error) throw hijack.error; return (listing.data?.length ?? 0) + (hijack.data?.length ?? 0); }
+export async function deleteAllCreators() { const db = client(); const listing = await db.from('creators').delete().not('id', 'is', null).select('id'); if (listing.error) throw listing.error; const hijack = await db.from('hijack_records').delete().not('id', 'is', null).select('id'); if (hijack.error) throw hijack.error; return (listing.data?.length ?? 0) + (hijack.data?.length ?? 0); }
 export type RecordStats = { total: number; currentMonth: number; previousMonth: number; daily: Array<{ date: string; count: number }> };
 const localIsoDate = (date: Date) => { const year = date.getFullYear(); const month = String(date.getMonth() + 1).padStart(2, '0'); const day = String(date.getDate()).padStart(2, '0'); return `${year}-${month}-${day}`; };
 export async function getRecordStats(): Promise<RecordStats> {
