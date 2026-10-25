@@ -167,10 +167,12 @@ export async function getDailyCounts(date: string): Promise<DailyCounts> {
   return { date, listing: listing.count ?? 0, hijack: hijack.count ?? 0 };
 }
 
-export async function getActivity(date: string, type: 'Both' | 'Listing' | 'Hijack' = 'Both'): Promise<ActivityResult> {
+export async function getActivity(date: string, type: 'Both' | 'Listing' | 'Hijack' = 'Both', limit = 5): Promise<ActivityResult> {
   const db = client();
-  const listingQuery = type === 'Hijack' ? Promise.resolve({ data: [], count: 0, error: null }) : db.from('creators').select('id,record_date,tiktok_link,email', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false }).limit(5);
-  const hijackQuery = type === 'Listing' ? Promise.resolve({ data: [], count: 0, error: null }) : db.from('hijack_records').select('id,record_date,tiktok_link,email,scope,target', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false }).limit(5);
+  const listingBase = db.from('creators').select('id,record_date,tiktok_link,email', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false });
+  const hijackBase = db.from('hijack_records').select('id,record_date,tiktok_link,email,scope,target', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false });
+  const listingQuery = type === 'Hijack' ? Promise.resolve({ data: [], count: 0, error: null }) : limit > 0 ? listingBase.limit(limit) : listingBase;
+  const hijackQuery = type === 'Listing' ? Promise.resolve({ data: [], count: 0, error: null }) : limit > 0 ? hijackBase.limit(limit) : hijackBase;
   const [listing, hijack] = await Promise.all([listingQuery, hijackQuery]);
   if (listing.error) throw listing.error;
   if (hijack.error) throw hijack.error;
