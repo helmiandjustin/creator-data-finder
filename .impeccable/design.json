@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-03T00:00:00Z",
+  "title": "Design System: Creator Data Finder",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Cloud Blue",
+        "canonical": "#2563d9",
+        "tonalRamp": ["#0d2d66", "#14408e", "#1b50b6", "#2563d9", "#4d7fe0", "#7ba0e9", "#abc0f0", "#dce4f9"]
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "Deep Navy Blue",
+        "canonical": "#1d4fb3",
+        "tonalRamp": ["#0a214e", "#0e2f70", "#123f93", "#1d4fb3", "#456fca", "#708fdb", "#a4b8ea", "#d5dff6"]
+      },
+      "primary-deep": {
+        "role": "primary",
+        "displayName": "Link Blue",
+        "canonical": "#205bc4",
+        "tonalRamp": ["#0c2757", "#0f3a7d", "#154ba3", "#205bc4", "#4a79d2", "#7399df", "#a5bced", "#d5e0f8"]
+      },
+      "success": {
+        "role": "neutral",
+        "displayName": "Hijack Green",
+        "canonical": "#19723e",
+        "tonalRamp": ["#093819", "#0c4c22", "#0e602c", "#19723e", "#378a58", "#5da778", "#90c49e", "#cae5d4"]
+      },
+      "danger": {
+        "role": "neutral",
+        "displayName": "Alert Red",
+        "canonical": "#b42318",
+        "tonalRamp": ["#5c0e0a", "#7d1510", "#9c1c15", "#b42318", "#c95146", "#dc8179", "#eab2ad", "#f7dddb"]
+      },
+      "warning": {
+        "role": "neutral",
+        "displayName": "Warning Amber",
+        "canonical": "#96600e",
+        "tonalRamp": ["#472e06", "#63410a", "#7e520d", "#96600e", "#b17f3e", "#cca36f", "#e0c5a3", "#f2e7d6"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink Navy",
+        "canonical": "#172033",
+        "tonalRamp": ["#0a0f1a", "#101624", "#141a2c", "#172033", "#3d4a63", "#66728a", "#9aa6bb", "#d6dcea"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "The single h1 page title only." },
+      "headline": { "displayName": "Headline", "purpose": "Panel titles atop each card (h2)." },
+      "title": { "displayName": "Title", "purpose": "Uppercase metric labels with wide tracking." },
+      "body": { "displayName": "Body", "purpose": "Descriptions and helper copy." },
+      "label": { "displayName": "Label", "purpose": "Uppercase table headers and the header eyebrow." }
+    },
+    "shadows": [
+      { "name": "card", "value": "0 4px 16px #263b6310", "purpose": "Default resting elevation for every card." },
+      { "name": "dropdown", "value": "0 10px 24px rgba(28,45,78,.14)", "purpose": "Firmer lift for floating popovers such as the brand/product results menu." }
+    ],
+    "motion": [
+      { "name": "transition-standard", "value": "background .2s ease, border-color .2s ease", "purpose": "Default easing for hover and focus state transitions." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "700px" },
+      { "name": "md", "value": "800px" },
+      { "name": "lg", "value": "1050px" },
+      { "name": "container", "value": "1180px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single action control; Cloud Blue fill.",
+      "html": "<button class=\"ds-btn-primary\">SEARCH</button>",
+      "css": ".ds-btn-primary{font-family:inherit;font-weight:650;border:0;border-radius:8px;background:#2563d9;color:#fff;padding:11px 16px;cursor:pointer;transition:background .2s ease}.ds-btn-primary:hover{background:#1d4fb3}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Quiet alternative action on a soft azure fill.",
+      "html": "<button class=\"ds-btn-secondary\">COPY EMAILS</button>",
+      "css": ".ds-btn-secondary{font-family:inherit;font-weight:650;border:0;border-radius:8px;background:#eef3fb;color:#2756a7;padding:11px 16px;cursor:pointer;transition:background .2s ease}.ds-btn-secondary:hover{background:#dde8fa}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Standard field; hairline stroke that deepens to Cloud Blue on focus.",
+      "html": "<input class=\"ds-input\" placeholder=\"Email or TikTok link\" />",
+      "css": ".ds-input{font:inherit;border:1px solid #cbd4e2;border-radius:8px;padding:11px 12px;color:#172033;background:#fff;width:100%;transition:border-color .2s ease}.ds-input::placeholder{color:#73809a}.ds-input:focus-visible{outline:none;border-color:#2563d9}"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "chip-status",
+      "description": "Fully-rounded semantic status pill; hue follows the two-ledger rule.",
+      "html": "<span class=\"ds-chip ds-chip--success\">Found</span>",
+      "css": ".ds-chip{display:inline-block;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:700;background:#eef1f6;color:#556278}.ds-chip--success{background:#e7f6ec;color:#18723c}.ds-chip--warn{background:#fff3df;color:#96600e}.ds-chip--danger{background:#fde9e7;color:#a12a20}"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Primary work panel; white surface with a hairline border and one soft shadow.",
+      "html": "<div class=\"ds-card\"><div style=\"font-weight:700;font-size:19px;color:#172033;margin:0 0 7px\">Add records</div><p style=\"margin:0;color:#66728a;font-size:14px\">Panel content container.</p></div>",
+      "css": ".ds-card{background:#fff;border:1px solid #e1e6ef;border-radius:12px;padding:22px;box-shadow:0 4px 16px #263b6310}"
+    },
+    {
+      "name": "Navigation Tab",
+      "kind": "nav",
+      "refersTo": "nav-active",
+      "description": "Horizontal underline tabs; the active tab carries a 2px Link Blue underline.",
+      "html": "<nav class=\"ds-nav\"><button class=\"ds-nav-btn active\">Single Search</button><button class=\"ds-nav-btn\">Batch Search</button></nav>",
+      "css": ".ds-nav{display:flex;gap:18px;border-bottom:1px solid #dfe5ef}.ds-nav-btn{background:none;border:0;border-bottom:2px solid transparent;color:#73809a;padding:12px 2px;cursor:pointer;font:inherit;font-weight:500}.ds-nav-btn:hover{color:#172033}.ds-nav-btn.active{color:#205bc4;border-bottom-color:#205bc4}"
+    },
+    {
+      "name": "Stepper Pill (Pipeline)",
+      "kind": "custom",
+      "refersTo": "chip-status",
+      "description": "Signature pipeline progress step; active is blue, done steps turn green and are clickable.",
+      "html": "<div class=\"ds-step done\"><span class=\"dot\">✓</span><span>Tempel & Parse</span></div>",
+      "css": ".ds-step{display:flex;align-items:center;gap:7px;padding:8px 12px;border:1px solid #e1e6ef;border-radius:999px;background:#f8fafc;color:#73809a;font-size:12px;font-weight:600}.ds-step .dot{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#e4e9f1;font-size:12px;font-weight:800}.ds-step.active{border-color:#2563d9;background:#eef4ff;color:#205bc4}.ds-step.active .dot{background:#2563d9;color:#fff}.ds-step.done{border-color:#b7d7c8;background:#ecf7f1;color:#19723e;cursor:pointer}.ds-step.done .dot{background:#19723e;color:#fff}"
+    },
+    {
+      "name": "Dashboard Metric Block",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "Signature metric panel; the listing variant is blue, hijack is green, per the two-ledger rule.",
+      "html": "<div class=\"ds-metric ds-metric--hijack\"><span class=\"icon\">◎</span><span><span class=\"label\">Hijack records</span><span class=\"number\">128</span></span></div>",
+      "css": ".ds-metric{display:grid;grid-template-columns:42px 1fr;gap:14px;align-items:start;padding:22px 24px;border:1px solid #dce7ff;border-radius:14px;background:linear-gradient(145deg,#f8fbff,#eef4ff)}.ds-metric .icon{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:#dfe8ff;color:#315ed4;font-size:24px;font-weight:800}.ds-metric .label{display:block;color:#5370a2;font-size:14px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.ds-metric .number{display:block;font-size:48px;line-height:1.05;color:#13234a}.ds-metric--hijack{border-color:#d3efdd;background:linear-gradient(145deg,#f0fbf7,#e5f8f1)}.ds-metric--hijack .icon{background:#d9f4e8;color:#15926f}.ds-metric--hijack .label{color:#258765}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Cloud Ledger",
+    "overview": "Creator Data Finder is an internal operator's console, not marketing. The whole system is built to make a high-volume, paste-heavy daily workflow feel calm, legible, and trustworthy. It lives on a cool near-white canvas with a restrained blue primary and a quiet, chip-based semantic vocabulary. There is no hero, no decorative illustration, and no dark theme — the interface disappears so the records do the talking.\n\nThe layout is tabular and dense by intent: cards stack as numbered work panels, data lives in tables with hairline row separators, and every control is a plain, unobtrusive rectangle. Density is earned through tight, consistent spacing and a clear hierarchy — small uppercase micro-labels introduce sections, while only actual data metrics get large numerals. Depth is expressed through subtle blue-tinted shadows and tonal surface tints rather than heavy decoration.\n\nThe signature idea is two-tone data semantics: the master Listing dataset is always blue, and the campaign-attribution Hijack dataset is always green. Provenance reads at a glance anywhere in the app — dashboard blocks, chips, and pipe steps carry the same hue code. This is a functional color system, not an accent for flair.",
+    "keyCharacteristics": [
+      "Cool, light near-white canvas with a single confident blue primary.",
+      "Dual semantic hue code: blue = Listing, green = Hijack.",
+      "Dense tabular layouts with hairline separators; no decorative imagery.",
+      "Subtle blue-tinted shadows and tonal gradient blocks for depth.",
+      "Uppercase micro-labels; large numerals reserved for metrics only."
+    ],
+    "rules": [
+      { "name": "The Two-Ledger Rule", "body": "Listing is always blue; Hijack is always green. A block, chip, or icon that reports on a particular dataset uses that dataset's hue — never a decorative third color. Provenance is always legible.", "section": "colors" },
+      { "name": "The Metric-Numeral Rule", "body": "Large numerals (48px on metrics, 34–54px on summary cards) are reserved strictly for data values and read in deep navy. Headings stay at 19–28px; nothing decorative is large.", "section": "typography" },
+      { "name": "The Flat-by-Default Rule", "body": "Surfaces rest flat with a hairline border; shadow is a single quiet step used only on cards and dropdowns — never as a decorative glow or on hover.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep the two data hues sacred: blue for Listing, green for Hijack, everywhere.",
+      "Do use uppercase micro-labels (12–14px, 0.05–0.08em tracking) for table headers and metric labels.",
+      "Do reserve large numerals for data metrics only.",
+      "Do keep tables compact with hairline row separators and left-aligned cells.",
+      "Do use fully-rounded pills for discrete status and step tokens."
+    ],
+    "donts": [
+      "Don't introduce a third accent hue that competes with the blue/green data semantics.",
+      "Don't replace hairline borders with heavy or colorful shadows.",
+      "Don't center-align table cells — alignment is consistently left.",
+      "Don't use large display type outside the page title and metric numerals.",
+      "Don't add decorative gradients, glass, or imagery; the app is an operator console, not a showcase."
+    ]
+  }
+}

@@ -1,3 +1,5 @@
+import type { ImportType, RevenueSource } from './config/constants';
+
 export type Creator = {
   itemId: string;
   date: string;
@@ -7,6 +9,14 @@ export type Creator = {
   normalizedEmail: string;
   normalizedTiktok: string;
   campaigns?: string[];
+  // Detail pipeline
+  revenue?: number | null;
+  itemSold?: number | null;
+  followers?: number | null;
+  sourceRevenueKol?: RevenueSource | null;
+  campaign?: string | null;
+  type?: ImportType | null;
+  source?: string | null;
 };
 
 export type BatchRow = {
@@ -23,4 +33,12 @@ export type CreatorInput = {
   creatorId: string;
   tiktok: string;
   email: string;
+  // Detail pipeline (opsional)
+  revenue?: number | null;
+  itemSold?: number | null;
+  followers?: number | null;
+  sourceRevenueKol?: RevenueSource | null;
+  campaign?: string | null;
+  type?: ImportType | null;
+  source?: string | null;
 };

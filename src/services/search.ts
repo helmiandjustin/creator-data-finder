@@ -13,8 +13,8 @@ export const detect = (value: string): Exclude<SearchField, 'Auto Detect'> | 'In
   return 'Invalid';
 };
 
-type DbCreator = { id: number; record_date: string | null; creator_id: string | null; tiktok_link: string | null; email: string | null; normalized_email: string | null; normalized_tiktok: string | null };
-const map = (row: DbCreator): Creator => ({ itemId: String(row.id), date: row.record_date ?? '', creatorId: row.creator_id ?? '', tiktok: row.tiktok_link ?? '', email: row.email ?? '', normalizedEmail: row.normalized_email ?? normalizeEmail(row.email ?? ''), normalizedTiktok: row.normalized_tiktok ?? normalizeTikTok(row.tiktok_link ?? '') });
+type DbCreator = { id: number; record_date: string | null; creator_id: string | null; tiktok_link: string | null; email: string | null; normalized_email: string | null; normalized_tiktok: string | null; revenue?: number | null; item_sold?: number | null; followers?: number | null; source_revenue_kol?: string | null; campaign?: string | null; type?: string | null; source?: string | null };
+const map = (row: DbCreator): Creator => ({ itemId: String(row.id), date: row.record_date ?? '', creatorId: row.creator_id ?? '', tiktok: row.tiktok_link ?? '', email: row.email ?? '', normalizedEmail: row.normalized_email ?? normalizeEmail(row.email ?? ''), normalizedTiktok: row.normalized_tiktok ?? normalizeTikTok(row.tiktok_link ?? ''), revenue: row.revenue ?? null, itemSold: row.item_sold ?? null, followers: row.followers ?? null, sourceRevenueKol: (row.source_revenue_kol as Creator['sourceRevenueKol']) ?? null, campaign: row.campaign ?? null, type: (row.type as Creator['type']) ?? null, source: row.source ?? null });
 type DbHijack = DbCreator & { scope: string | null; target: string | null };
 const mapHijack = (row: DbHijack): Creator => ({ ...map(row), itemId: `hijack-${row.id}`, campaigns: [`${row.scope ?? 'Campaign'}: ${row.target ?? '—'}`] });
 const mergeRecords = (records: Creator[]) => [...records.reduce((merged, record) => {
@@ -86,7 +86,7 @@ export class CloudSearch {
   }
 }
 
-export const toDb = (row: CreatorInput) => { const tiktok = row.tiktok.trim(); const link = tiktok && !/^https?:\/\//i.test(tiktok) ? `https://www.tiktok.com/@${tiktok.replace(/^@/, '')}` : tiktok; return { record_date: normalizeDate(row.date) || null, creator_id: row.creatorId.trim() || null, tiktok_link: link || null, email: row.email.trim() || null, normalized_email: normalizeEmail(row.email) || null, normalized_tiktok: normalizeTikTok(tiktok) || null }; };
+export const toDb = (row: CreatorInput) => { const tiktok = row.tiktok.trim(); const link = tiktok && !/^https?:\/\//i.test(tiktok) ? `https://www.tiktok.com/@${tiktok.replace(/^@/, '')}` : tiktok; return { record_date: normalizeDate(row.date) || null, creator_id: row.creatorId.trim() || null, tiktok_link: link || null, email: row.email.trim() || null, normalized_email: normalizeEmail(row.email) || null, normalized_tiktok: normalizeTikTok(tiktok) || null, revenue: row.revenue ?? null, item_sold: row.itemSold ?? null, followers: row.followers ?? null, source_revenue_kol: row.sourceRevenueKol ?? null, campaign: row.campaign ?? null, type: row.type ?? null, source: row.source ?? null }; };
 
 async function removeDuplicates(rows: CreatorInput[]) {
   const candidates = rows.map(toDb);
@@ -151,6 +151,53 @@ export async function insertCreators(rows: CreatorInput[], onProgress: (done: nu
 
 export async function insertCreator(row: CreatorInput) { const inserted = await insertCreators([row], () => undefined); if (!inserted) throw new Error('Record duplikat: email atau username TikTok sudah ada.'); }
 export async function countCreators() { const { count, error } = await client().from('creators').select('id', { count: 'exact', head: true }); if (error) throw error; return count ?? 0; }
+
+export type PipelineSaveResult = { inserted: number; updated: number };
+
+/**
+ * Simpan baris pipeline. Kalau username sudah ada di justin (duplikat),
+ * baris itu di-UPDATE (kolom detail) alih-alih dibuang — berguna saat
+ * creator yang sama muncul lagi dengan Source Revenue / campaign berbeda.
+ */
+export async function savePipelineRows(rows: CreatorInput[], onProgress?: (done: number, total: number) => void): Promise<PipelineSaveResult> {
+  const db = client();
+  const norms = rows.map(r => normalizeTikTok(r.tiktok)).filter(Boolean);
+  const existing = new Set<string>();
+  for (let i = 0; i < norms.length; i += 500) {
+    const chunk = norms.slice(i, i + 500);
+    const { data } = await db.from('creators').select('normalized_tiktok').in('normalized_tiktok', chunk);
+    for (const row of data ?? []) if (row.normalized_tiktok) existing.add(row.normalized_tiktok);
+  }
+
+  const toInsert: Record<string, unknown>[] = [];
+  const toUpdate: Record<string, unknown>[] = [];
+  for (const row of rows) {
+    const norm = normalizeTikTok(row.tiktok);
+    const dbRow = { ...toDb(row) };
+    if (existing.has(norm)) toUpdate.push({ ...dbRow, normalized_tiktok: norm });
+    else toInsert.push(dbRow);
+  }
+
+  let inserted = 0;
+  let updated = 0;
+  for (let i = 0; i < toInsert.length; i += 500) {
+    const chunk = toInsert.slice(i, i + 500);
+    const { error } = await db.from('creators').insert(chunk);
+    if (error) throw error;
+    inserted += chunk.length;
+    onProgress?.(inserted + updated, rows.length);
+  }
+  for (const u of toUpdate) {
+    const { error } = await db.from('creators').update({
+      revenue: u.revenue, item_sold: u.item_sold, followers: u.followers,
+      source_revenue_kol: u.source_revenue_kol, campaign: u.campaign, type: u.type, source: u.source,
+    }).eq('normalized_tiktok', u.normalized_tiktok as string);
+    if (error) throw error;
+    updated += 1;
+    onProgress?.(inserted + updated, rows.length);
+  }
+  return { inserted, updated };
+}
 export async function deleteCreatorsByDate(date: string) { const db = client(); const listing = await db.from('creators').delete().eq('record_date', date).select('id'); if (listing.error) throw listing.error; const hijack = await db.from('hijack_records').delete().eq('record_date', date).select('id'); if (hijack.error) throw hijack.error; return (listing.data?.length ?? 0) + (hijack.data?.length ?? 0); }
 export async function deleteAllCreators() { const db = client(); const listing = await db.from('creators').delete().not('id', 'is', null).select('id'); if (listing.error) throw listing.error; const hijack = await db.from('hijack_records').delete().not('id', 'is', null).select('id'); if (hijack.error) throw hijack.error; return (listing.data?.length ?? 0) + (hijack.data?.length ?? 0); }
 export type RecordStats = { total: number; currentMonth: number; previousMonth: number; daily: Array<{ date: string; count: number }> };

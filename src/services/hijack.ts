@@ -8,7 +8,7 @@ export type HijackInput = { date: string; tiktok: string; email: string };
 export type HijackStats = { total: number; matchedReplies: number; unknownReplies: number; byBrand: Array<{ target: string; total: number; replies: number }>; byProduct: Array<{ target: string; total: number; replies: number }> };
 export type DailyCounts = { date: string; listing: number; hijack: number };
 export type MonthlyCounts = { month: string; listing: number; hijack: number };
-export type ActivityRow = { id: string; username: string; email: string; type: 'Listing' | 'Hijack'; campaign: string };
+export type ActivityRow = { id: string; username: string; email: string; type: 'Listing' | 'Hijack'; campaign: string; sourceRevenue: string; date: string };
 export type ActivityResult = { rows: ActivityRow[]; counts: { listing: number; hijack: number } };
 
 const client = () => { if (!supabase) throw new Error('Supabase belum dikonfigurasi.'); return supabase; };
@@ -127,6 +127,12 @@ export async function matchHijackInputs(input: string) {
     const record = { itemId: String(row.id), date: row.record_date ?? '', creatorId: row.creator_id ?? '', tiktok: row.tiktok_link ?? '', email: row.email ?? '', normalizedEmail: row.normalized_email ?? '', normalizedTiktok: row.normalized_tiktok ?? '' } as Creator;
     [record.normalizedEmail, record.normalizedTiktok].filter(Boolean).forEach(key => masterByKey.set(key, record));
   });
+  // Pipeline / master: tambahkan hasil import pipeline sebagai match dengan campaign-nya,
+  // sehingga creator yang reply dari hasil pipeline tetap terlihat brand/product (campaign) di Match replies.
+  masterRecords.forEach(row => {
+    const rec = { itemId: `creator-${row.id}`, date: row.record_date ?? '', creatorId: row.creator_id ?? '', tiktok: row.tiktok_link ?? '', email: row.email ?? '', normalizedEmail: row.normalized_email ?? '', normalizedTiktok: row.normalized_tiktok ?? '', campaigns: row.campaign ? [`${row.type === 'Hijack' ? 'Hijack' : 'Listing'}: ${row.campaign}`] : [] } as Creator;
+    [rec.normalizedEmail, rec.normalizedTiktok].filter(Boolean).forEach(key => byInput.set(key, [...(byInput.get(key) ?? []), rec]));
+  });
   masterRecords.forEach(row => {
     const master = masterByKey.get(row.normalized_email ?? '') ?? masterByKey.get(row.normalized_tiktok ?? '');
     if (!master) return;
@@ -169,17 +175,28 @@ export async function getDailyCounts(date: string): Promise<DailyCounts> {
 
 export async function getActivity(date: string, type: 'Both' | 'Listing' | 'Hijack' = 'Both', limit = 5): Promise<ActivityResult> {
   const db = client();
-  const listingBase = db.from('creators').select('id,record_date,tiktok_link,email', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false });
+  let hasExtras = true;
+  const runListing = async () => {
+    const base = db.from('creators').select('id,record_date,tiktok_link,email,campaign,source_revenue_kol', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false });
+    const res = limit > 0 ? await base.limit(limit) : await base;
+    // Kolom baru belum ada (migrasi belum dijalankan) → ulangi tanpa kolom baru.
+    if (res.error && res.error.code === '42703') {
+      hasExtras = false;
+      const fallback = db.from('creators').select('id,record_date,tiktok_link,email', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false });
+      return limit > 0 ? await fallback.limit(limit) : await fallback;
+    }
+    return res;
+  };
   const hijackBase = db.from('hijack_records').select('id,record_date,tiktok_link,email,scope,target', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false });
-  const listingQuery = type === 'Hijack' ? Promise.resolve({ data: [], count: 0, error: null }) : limit > 0 ? listingBase.limit(limit) : listingBase;
-  const hijackQuery = type === 'Listing' ? Promise.resolve({ data: [], count: 0, error: null }) : limit > 0 ? hijackBase.limit(limit) : hijackBase;
+  const listingQuery = type === 'Hijack' ? Promise.resolve({ data: [], count: 0, error: null }) : runListing();
+  const hijackQuery = type === 'Listing' ? Promise.resolve({ data: [], count: 0, error: null }) : (limit > 0 ? hijackBase.limit(limit) : hijackBase);
   const [listing, hijack] = await Promise.all([listingQuery, hijackQuery]);
   if (listing.error) throw listing.error;
   if (hijack.error) throw hijack.error;
   const username = (value: string | null) => normalizeTikTok(value ?? '') || '—';
   const rows = [
-    ...(listing.data ?? []).map(row => ({ id: `listing-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Listing' as const, campaign: 'Creator Finder' })),
-    ...(hijack.data ?? []).map(row => ({ id: `hijack-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Hijack' as const, campaign: `${row.scope ?? 'Campaign'}: ${row.target ?? '—'}` }))
+    ...(listing.data ?? []).map((row: any) => ({ id: `listing-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Listing' as const, campaign: hasExtras ? (row.campaign || '—') : '—', sourceRevenue: hasExtras ? (row.source_revenue_kol || '—') : '—', date: row.record_date ?? '—' })),
+    ...(hijack.data ?? []).map(row => ({ id: `hijack-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Hijack' as const, campaign: `${row.scope ?? 'Campaign'}: ${row.target ?? '—'}`, sourceRevenue: '—', date: row.record_date ?? '—' }))
   ];
   return { rows, counts: { listing: listing.count ?? 0, hijack: hijack.count ?? 0 } };
 }
