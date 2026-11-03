@@ -75,18 +75,33 @@ export function parseScrape(text: string): ParsedScrapeRow[] {
       continue;
     }
 
-    // Fallback: tebak kolom (username di depan, lalu angka)
+    // Fallback: tebak kolom.
+    // Utamakan handle eksplisit (@...) di mana pun posisinya; jangan sampai
+    // display name (sering berisi emoji/spasi/karakter khusus) terambil sebagai username.
     let username = '';
-    let rest: string[] = [];
+    let usedIndex = -1;
+    const extractHandle = (cell: string): string | null => {
+      const m = cell.match(/@[a-zA-Z0-9._-]+/);
+      return m ? cleanUsername(m[0]) : null;
+    };
+    // 1) Cari sel yang mengandung @ (handle). Menangani display-name-first & sel campur-emosi.
     for (let i = 0; i < cells.length; i++) {
-      const cell = cells[i];
-      if (!username && (cell.includes('@') || /^[a-zA-Z0-9._-]{2,}$/.test(cell) && !parseNumber(cell))) {
-        username = cleanUsername(cell);
-      } else {
-        rest.push(cell);
+      const h = extractHandle(cells[i]);
+      if (h) { username = h; usedIndex = i; break; }
+    }
+    // 2) Tanpa @, pakai token alfanumerik polos pertama yang bukan angka (handle tanpa @).
+    if (!username) {
+      for (let i = 0; i < cells.length; i++) {
+        const cell = cells[i];
+        if (/^[a-zA-Z0-9._-]{2,}$/.test(cell) && !parseNumber(cell)) {
+          username = cleanUsername(cell);
+          usedIndex = i;
+          break;
+        }
       }
     }
     if (!username) continue;
+    const rest = cells.filter((_, i) => i !== usedIndex);
     const numbers = rest.map(parseNumber).filter((n): n is number => n !== null);
     rows.push({
       username,

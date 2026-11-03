@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { errorText, savePipelineRows } from '../services/search';
-import { cleanUsername, getOfficePics, isOfficeDuplicate, parseNumber, parseScrape } from '../services/useeView';
+import { cleanUsername, getOfficePics, isOfficeDuplicate, parseNumber } from '../services/useeView';
 import { IMPORT_TYPES, REVENUE_SOURCES, type ImportType } from '../config/constants';
 import type { CreatorInput } from '../types';
 import type { Catalog } from '../services/hijack';
@@ -22,6 +22,8 @@ type PRow = {
 };
 
 const STEPS = ['Tempel & Parse', 'Cek Duplikat', 'Detail & Mode', 'Email', 'Review & Simpan'];
+const FIELD_ORDER_STEP0 = ['username', 'revenue', 'itemSold', 'followers'];
+const FIELD_ORDER_STEP3 = ['username', 'revenue', 'itemSold', 'followers', 'sourceKol', 'campaign', 'type'];
 const copyText = async (text: string): Promise<boolean> => {
   try {
     await navigator.clipboard.writeText(text);
@@ -46,7 +48,6 @@ const rowComplete = (row: PRow) => isValidEmail(row.email) && Boolean(row.revenu
 
 export default function PipelinePanel({ catalog }: { catalog?: Catalog | null }) {
   const [step, setStep] = useState(0);
-  const [pasteText, setPasteText] = useState('');
   const [rows, setRows] = useState<PRow[]>([]);
   const [recordDate, setRecordDate] = useState(todayIso());
   const [checking, setChecking] = useState(false);
@@ -67,18 +68,6 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
   useEffect(() => { setNotice(''); setShowAll(false); }, [step]);
 
   const campaignOptions = (catalog?.brands ?? []).flatMap(brand => [brand.name, ...brand.products.map(product => `${brand.name} · ${product}`)]);
-
-  const parse = () => {
-    setError('');
-    try {
-      const parsed = parseScrape(pasteText);
-      setRows(parsed.map(p => ({ username: p.username, email: '', revenue: p.revenue, itemSold: p.itemSold, followers: p.followers, sourceKol: '', campaign: 'Expert Search Kalodata', type: 'Listing', status: 'unknown', officePics: [] })));
-      setChecked(false);
-      setDroppedCount(0);
-      setNotice(`${parsed.length} baris di-parse. Tekan "Jalankan cek duplikat" untuk lanjut.`);
-      setStep(1);
-    } catch (e) { setError(errorText(e)); }
-  };
 
   const runCheck = async () => {
     setChecking(true); setError('');
@@ -114,10 +103,62 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
     } catch (e) { setError(errorText(e)); } finally { setChecking(false); }
   };
 
-  const updateRow = (index: number, patch: Partial<PRow>) => setRows(rows => rows.map((row, i) => i === index ? { ...row, ...patch } : row));
+  const emptyRow = (): PRow => ({ username: '', email: '', revenue: '', itemSold: '', followers: '', sourceKol: '' as PRow['sourceKol'], campaign: '', type: 'Listing' as ImportType, status: 'unknown' as RowStatus, officePics: [] as string[] });
+
+  const updateRow = (index: number, patch: Partial<PRow>) => setRows(prev => {
+    const next = [...prev];
+    while (next.length <= index) next.push(emptyRow());
+    next[index] = { ...next[index], ...patch };
+    return next;
+  });
 
   const applyKol = () => { if (kolFill) setRows(rows.map(row => ({ ...row, sourceKol: kolFill as PRow['sourceKol'] }))); };
   const applyCamp = () => { if (campFill.trim()) setRows(rows.map(row => ({ ...row, campaign: campFill.trim() }))); };
+
+  const clearAll = () => {
+    if (!rows.length) return;
+    if (!window.confirm('Kosongkan semua baris? Data yang belum disimpan akan hilang.')) return;
+    setRows([]); setInclude({}); setChecked(false); setDroppedCount(0);
+  };
+
+  const handleGridPaste = (e: React.ClipboardEvent<HTMLInputElement>, colKey: string, fieldOrder: string[], startIndex: number) => {
+    const text = e.clipboardData.getData('text');
+    if (!text.trim()) return;
+    e.preventDefault();
+    const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+    if (!lines.length) return;
+    const startCol = fieldOrder.indexOf(colKey);
+    if (startCol < 0) return;
+    setRows(prev => {
+      const next = [...prev];
+      let filled = 0;
+      for (let r = 0; r < lines.length; r++) {
+        const destRow = startIndex + r;
+        while (next.length <= destRow) next.push(emptyRow());
+        const cells = lines[r].split(/[\t;]|\s{2,}/).map(c => c.trim());
+        for (let c = 0; c < cells.length; c++) {
+          const raw = cells[c];
+          if (!raw) continue;
+          const field = fieldOrder[startCol + c];
+          if (!field) continue;
+          const row = { ...next[destRow] };
+          switch (field) {
+            case 'username': row.username = cleanUsername(raw); break;
+            case 'revenue': row.revenue = raw; break;
+            case 'itemSold': row.itemSold = raw; break;
+            case 'followers': row.followers = raw; break;
+            case 'campaign': row.campaign = raw; break;
+            case 'sourceKol': if ((REVENUE_SOURCES as readonly string[]).includes(raw)) row.sourceKol = raw as PRow['sourceKol']; break;
+            case 'type': { const t = raw.toLowerCase() === 'hijack' ? 'Hijack' : raw.toLowerCase() === 'listing' ? 'Listing' : null; if (t) row.type = t as ImportType; break; }
+          }
+          next[destRow] = row;
+          filled++;
+        }
+      }
+      setNotice(`${filled} sel terisi mulai baris ${startIndex + 1}.`);
+      return next;
+    });
+  };
 
   const exportUsernames = async () => {
     const list = rows.map(row => row.username);
@@ -162,7 +203,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       if (!toSave.length) { setError('Tidak ada baris lengkap untuk disimpan (semua butuh email + revenue + item sold).'); setBusy(false); return; }
       const result = await savePipelineRows(toSave, done => setProgress({ done, total: toSave.length }));
       setNotice(`${result.inserted} baru disimpan · ${result.updated} diperbarui.`);
-      setRows([]); setPasteText(''); setEmailText(''); setStep(0); setProgress({ done: 0, total: 0 });
+      setRows([]); setEmailText(''); setStep(0); setProgress({ done: 0, total: 0 });
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
 
@@ -192,10 +233,36 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
 
       {step === 0 && (
         <div className="card">
-          <h2>1 · Tempel data hasil scraping</h2>
-          <p>Tempel hasil export (Kalodata/Fastmoss) — format apa pun (CSV/TSV/teks). Sistem auto-detect kolom dan membersihkan @ username.</p>
-          <textarea value={pasteText} onChange={e => setPasteText(e.target.value)} placeholder={'@honeybutter_babe\tHaley\tRp24.98m\t37\t9.98k\n@nextuser\t...'} />
-          <div className="batch-actions"><span>{pasteText.split(/\r?\n/).filter(Boolean).length} baris</span><button onClick={parse} disabled={!pasteText.trim()}>Parse</button></div>
+          <h2>1 · Tempel & Parse</h2>
+          <p>Klik sel di grid, lalu Ctrl+V dari Excel — nilai otomatis terisi ke bawah (fill down). Untuk menambah baris baru, klik sel di baris terbawah (baris "+") lalu Ctrl+V.</p>
+          <div className="table-wrap"><table className="pipeline-grid"><thead><tr><th>Username</th><th>Revenue</th><th>Item sold</th><th>Followers</th></tr></thead><tbody>
+            {Array.from({ length: Math.max(Math.min(rows.length, showAll ? rows.length : 5), 1) }).map((_, i) => {
+              const row = rows[i] ?? emptyRow();
+              return (
+                <tr key={i}>
+                  <td className="p-username"><input value={row.username} onChange={e => updateRow(i, { username: e.target.value })} onPaste={e => handleGridPaste(e, 'username', FIELD_ORDER_STEP0, i)} placeholder="@username" /></td>
+                  <td><input value={row.revenue} onChange={e => updateRow(i, { revenue: e.target.value })} onPaste={e => handleGridPaste(e, 'revenue', FIELD_ORDER_STEP0, i)} placeholder="0" /></td>
+                  <td><input value={row.itemSold} onChange={e => updateRow(i, { itemSold: e.target.value })} onPaste={e => handleGridPaste(e, 'itemSold', FIELD_ORDER_STEP0, i)} placeholder="0" /></td>
+                  <td><input value={row.followers} onChange={e => updateRow(i, { followers: e.target.value })} onPaste={e => handleGridPaste(e, 'followers', FIELD_ORDER_STEP0, i)} placeholder="0" /></td>
+                </tr>
+              );
+            })}
+            {rows.length > 0 && (
+              <tr className="p-append-row">
+                <td><input onPaste={e => handleGridPaste(e, 'username', FIELD_ORDER_STEP0, rows.length)} placeholder="@username +" /></td>
+                <td><input onPaste={e => handleGridPaste(e, 'revenue', FIELD_ORDER_STEP0, rows.length)} placeholder="0 +" /></td>
+                <td><input onPaste={e => handleGridPaste(e, 'itemSold', FIELD_ORDER_STEP0, rows.length)} placeholder="0 +" /></td>
+                <td><input onPaste={e => handleGridPaste(e, 'followers', FIELD_ORDER_STEP0, rows.length)} placeholder="0 +" /></td>
+              </tr>
+            )}
+          </tbody></table></div>
+          <div className="grid-actions">
+            {rows.length > 5 && (
+              <button className="secondary" onClick={() => setShowAll(v => !v)}>{showAll ? 'Tampilkan lebih sedikit' : `Tampilkan semua (${rows.length})`}</button>
+            )}
+            {rows.length > 0 && <button className="secondary" onClick={clearAll}>Clear (kosongkan semua)</button>}
+            <button className="secondary" disabled={!rows.length} onClick={() => { setChecked(false); setDroppedCount(0); setStep(1); }}>Lanjut ke Cek Duplikat »</button>
+          </div>
         </div>
       )}
 
@@ -242,21 +309,38 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
             <label>Campaign<input value={campFill} onChange={e => setCampFill(e.target.value)} placeholder="contoh: campaign name" /><button className="secondary" onClick={applyCamp}>Apply ke semua</button></label>
           </div>
           <div className="table-wrap"><table className="pipeline-grid"><thead><tr><th>Username</th><th>Revenue</th><th>Item sold</th><th>Followers</th><th>Source Revenue</th><th>Campaign</th><th>Mode</th></tr></thead><tbody>
-            {previewRows(rows).map((row, i) => (
-              <tr key={i}>
-                <td className="p-username">{row.username}</td>
-                <td><input value={row.revenue} onChange={e => updateRow(i, { revenue: e.target.value })} placeholder="0" /></td>
-                <td><input value={row.itemSold} onChange={e => updateRow(i, { itemSold: e.target.value })} placeholder="0" /></td>
-                <td><input value={row.followers} onChange={e => updateRow(i, { followers: e.target.value })} placeholder="0" /></td>
-                <td><select value={row.sourceKol} onChange={e => updateRow(i, { sourceKol: e.target.value as PRow['sourceKol'] })}><option value="">—</option>{REVENUE_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}</select></td>
-                <td><input list="pipeline-campaign-list" value={row.campaign} onChange={e => updateRow(i, { campaign: e.target.value })} placeholder="expert search / bebas" /></td>
-                <td><div className="mode-switch p-mode"><button className={row.type === 'Listing' ? '' : 'secondary'} onClick={() => updateRow(i, { type: 'Listing' })}>Listing</button><button className={row.type === 'Hijack' ? '' : 'secondary'} onClick={() => updateRow(i, { type: 'Hijack' })}>Hijack</button></div></td>
+            {Array.from({ length: Math.max(Math.min(rows.length, showAll ? rows.length : 5), 1) }).map((_, i) => {
+              const row = rows[i] ?? emptyRow();
+              return (
+                <tr key={i}>
+                  <td className="p-username"><input value={row.username} onChange={e => updateRow(i, { username: e.target.value })} onPaste={e => handleGridPaste(e, 'username', FIELD_ORDER_STEP3, i)} placeholder="@username" /></td>
+                  <td><input value={row.revenue} onChange={e => updateRow(i, { revenue: e.target.value })} onPaste={e => handleGridPaste(e, 'revenue', FIELD_ORDER_STEP3, i)} placeholder="0" /></td>
+                  <td><input value={row.itemSold} onChange={e => updateRow(i, { itemSold: e.target.value })} onPaste={e => handleGridPaste(e, 'itemSold', FIELD_ORDER_STEP3, i)} placeholder="0" /></td>
+                  <td><input value={row.followers} onChange={e => updateRow(i, { followers: e.target.value })} onPaste={e => handleGridPaste(e, 'followers', FIELD_ORDER_STEP3, i)} placeholder="0" /></td>
+                  <td><select value={row.sourceKol} onChange={e => updateRow(i, { sourceKol: e.target.value as PRow['sourceKol'] })}><option value="">—</option>{REVENUE_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}</select></td>
+                  <td><input list="pipeline-campaign-list" value={row.campaign} onChange={e => updateRow(i, { campaign: e.target.value })} onPaste={e => handleGridPaste(e, 'campaign', FIELD_ORDER_STEP3, i)} placeholder="expert search / bebas" /></td>
+                  <td><div className="mode-switch p-mode"><button className={row.type === 'Listing' ? '' : 'secondary'} onClick={() => updateRow(i, { type: 'Listing' })}>Listing</button><button className={row.type === 'Hijack' ? '' : 'secondary'} onClick={() => updateRow(i, { type: 'Hijack' })}>Hijack</button></div></td>
+                </tr>
+              );
+            })}
+            {rows.length > 0 && (
+              <tr className="p-append-row">
+                <td><input onPaste={e => handleGridPaste(e, 'username', FIELD_ORDER_STEP3, rows.length)} placeholder="@username +" /></td>
+                <td><input onPaste={e => handleGridPaste(e, 'revenue', FIELD_ORDER_STEP3, rows.length)} placeholder="0 +" /></td>
+                <td><input onPaste={e => handleGridPaste(e, 'itemSold', FIELD_ORDER_STEP3, rows.length)} placeholder="0 +" /></td>
+                <td><input onPaste={e => handleGridPaste(e, 'followers', FIELD_ORDER_STEP3, rows.length)} placeholder="0 +" /></td>
+                <td><input onPaste={e => handleGridPaste(e, 'sourceKol', FIELD_ORDER_STEP3, rows.length)} placeholder="live/videos +" /></td>
+                <td><input onPaste={e => handleGridPaste(e, 'campaign', FIELD_ORDER_STEP3, rows.length)} placeholder="campaign +" /></td>
+                <td><input onPaste={e => handleGridPaste(e, 'type', FIELD_ORDER_STEP3, rows.length)} placeholder="Listing/Hijack +" /></td>
               </tr>
-            ))}
+            )}
           </tbody></table></div>
-          {showMoreFooter(rows)}
           <datalist id="pipeline-campaign-list">{campaignOptions.map(option => <option key={option} value={option} />)}</datalist>
           <div className="grid-actions">
+            {rows.length > 5 && (
+              <button className="secondary" onClick={() => setShowAll(v => !v)}>{showAll ? 'Tampilkan lebih sedikit' : `Tampilkan semua (${rows.length})`}</button>
+            )}
+            {rows.length > 0 && <button className="secondary" onClick={clearAll}>Clear (kosongkan semua)</button>}
             <button className="secondary" onClick={() => setStep(1)}>« Kembali</button>
             <button onClick={() => setStep(3)}>Lanjut ke Email »</button>
           </div>

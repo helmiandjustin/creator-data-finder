@@ -90,6 +90,5 @@ function HijackPanel({ catalog, error, onSave }: { catalog: Catalog | null; erro
 }
 const emptyHijackRow = () => ({ date: '', tiktok: '', email: '' });
 const shortHijackProduct = (value: string) => value.length > 72 ? `${value.slice(0, 69).trim()}…` : value;
-function Rankings({ rows }: { rows: Array<{ target: string; total: number; replies: number }> }) { return rows.length ? <div>{rows.slice(0, 5).map(row => <div className="rank" key={row.target}><div className="rank-head"><span>{row.target}</span><span>{row.replies} replies · {row.total} hijack</span></div></div>)}</div> : <p className="muted">Belum ada data.</p>; }
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
