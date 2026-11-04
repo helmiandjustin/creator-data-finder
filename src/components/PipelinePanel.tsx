@@ -24,6 +24,7 @@ type PRow = {
 const STEPS = ['Tempel & Parse', 'Cek Duplikat', 'Detail & Mode', 'Email', 'Review & Simpan'];
 const FIELD_ORDER_STEP0 = ['username', 'revenue', 'itemSold', 'followers'];
 const FIELD_ORDER_STEP3 = ['username', 'revenue', 'itemSold', 'followers', 'sourceKol', 'campaign', 'type'];
+const FIELD_ORDER_EMAIL = ['username', 'email'];
 const copyText = async (text: string): Promise<boolean> => {
   try {
     await navigator.clipboard.writeText(text);
@@ -44,6 +45,13 @@ const copyText = async (text: string): Promise<boolean> => {
 };
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const isValidEmail = (value: string) => Boolean(value && value.trim() && !/^not found$/i.test(value.trim()));
+const cleanEmail = (value: string): string => {
+  const s = (value || '').trim();
+  if (!s || /^not found$/i.test(s)) return '';
+  // Ekstrak pola alamat email valid dari teks yang mungkin mengandung junk di depan/belakang.
+  const m = s.match(/[A-Z0-9][A-Z0-9._%+-]*@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return m ? m[0] : s;
+};
 const rowComplete = (row: PRow) => isValidEmail(row.email) && Boolean(row.revenue) && Boolean(row.itemSold);
 
 export default function PipelinePanel({ catalog }: { catalog?: Catalog | null }) {
@@ -56,7 +64,6 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [showCleanOnly, setShowCleanOnly] = useState(false);
-  const [emailText, setEmailText] = useState('');
   const [include, setInclude] = useState<Record<number, boolean>>({});
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [kolFill, setKolFill] = useState('');
@@ -144,6 +151,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
           const row = { ...next[destRow] };
           switch (field) {
             case 'username': row.username = cleanUsername(raw); break;
+            case 'email': { const em = cleanEmail(raw); if (em) row.email = em; break; }
             case 'revenue': row.revenue = raw; break;
             case 'itemSold': row.itemSold = raw; break;
             case 'followers': row.followers = raw; break;
@@ -164,20 +172,6 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
     const list = rows.map(row => row.username);
     const ok = await copyText(list.join('\n'));
     setNotice(ok ? `${list.length} username disalin ke clipboard.` : 'Gagal menyalin ke clipboard.');
-  };
-
-  const applyEmails = () => {
-    const map = new Map<string, string>();
-    for (const line of emailText.split(/\r?\n/)) {
-      const m = line.match(/([^\t\s]+)[\t ]+(.+)/);
-      if (!m) continue;
-      const val = m[2].trim();
-      // Anggap "not found"/kosong sebagai TIDAK punya email → di-skip.
-      if (!val || /^not found$/i.test(val)) continue;
-      map.set(cleanUsername(m[1]), val);
-    }
-    setRows(rows.map(row => ({ ...row, email: map.get(row.username) ?? row.email })));
-    setNotice('Email di-join per username. Cek kolom email di tabel.');
   };
 
   const completeRows = rows.filter((row, i) => include[i] === true && rowComplete(row));
@@ -203,7 +197,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       if (!toSave.length) { setError('Tidak ada baris lengkap untuk disimpan (semua butuh email + revenue + item sold).'); setBusy(false); return; }
       const result = await savePipelineRows(toSave, done => setProgress({ done, total: toSave.length }));
       setNotice(`${result.inserted} baru disimpan · ${result.updated} diperbarui.`);
-      setRows([]); setEmailText(''); setStep(0); setProgress({ done: 0, total: 0 });
+      setRows([]); setStep(0); setProgress({ done: 0, total: 0 });
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
 
@@ -350,21 +344,33 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       {step === 3 && (
         <div className="card">
           <h2>4 · Cari Email</h2>
-          <div className="pipeline-email">
-            <div className="panel">
-              <h3>Cari email (provider manual)</h3>
-              <p>Salin daftar username (semua baris dari Detail & Mode), tempel ke tool cari email kamu.</p>
-              <button className="secondary" onClick={exportUsernames}>Copy semua username</button>
-            </div>
-            <div className="panel">
-              <h3>Paste hasil email</h3>
-              <p>Format: <code>username&lt;Tab&gt;email</code> (satu per baris). Sistem join otomatis per username.</p>
-              <textarea value={emailText} onChange={e => setEmailText(e.target.value)} placeholder={'cynsfavesandfinds\tcynsfavesandfinds@gmail.com\nthisisexampleofnotfound\tnot found'} />
-              <button onClick={applyEmails}>Gabungkan email</button>
-            </div>
+          <p>Salin hasil dari tool cari email kamu (kolom username + email), lalu tempel langsung ke grid di bawah — nilai otomatis mengisi baris (fill down), sama seperti Tempel & Parse. Hanya baris yang kamu tempel yang terisi, jadi jumlahnya pasti exact.</p>
+          <div className="grid-actions">
+            <button className="secondary" onClick={exportUsernames}>Copy semua username</button>
           </div>
+          <div className="table-wrap"><table className="pipeline-grid"><thead><tr><th>Username</th><th>Email</th></tr></thead><tbody>
+            {Array.from({ length: Math.max(Math.min(rows.length, showAll ? rows.length : 5), 1) }).map((_, i) => {
+              const row = rows[i] ?? emptyRow();
+              return (
+                <tr key={i}>
+                  <td className="p-username"><input value={row.username} onChange={e => updateRow(i, { username: e.target.value })} onPaste={e => handleGridPaste(e, 'username', FIELD_ORDER_EMAIL, i)} placeholder="@username" /></td>
+                  <td><input value={row.email} onChange={e => updateRow(i, { email: e.target.value })} onPaste={e => handleGridPaste(e, 'email', FIELD_ORDER_EMAIL, i)} placeholder="email" /></td>
+                </tr>
+              );
+            })}
+            {rows.length > 0 && (
+              <tr className="p-append-row">
+                <td><input onPaste={e => handleGridPaste(e, 'username', FIELD_ORDER_EMAIL, rows.length)} placeholder="@username +" /></td>
+                <td><input onPaste={e => handleGridPaste(e, 'email', FIELD_ORDER_EMAIL, rows.length)} placeholder="email +" /></td>
+              </tr>
+            )}
+          </tbody></table></div>
           <div className="pipeline-summary"><span><b>{rows.filter(r => r.email).length}</b> punya email</span><span><b>{missingEmail}</b> belum (akan ditandai)</span></div>
           <div className="grid-actions">
+            {rows.length > 5 && (
+              <button className="secondary" onClick={() => setShowAll(v => !v)}>{showAll ? 'Tampilkan lebih sedikit' : `Tampilkan semua (${rows.length})`}</button>
+            )}
+            {rows.length > 0 && <button className="secondary" onClick={clearAll}>Clear (kosongkan semua)</button>}
             <button className="secondary" onClick={() => setStep(2)}>« Kembali</button>
             <button onClick={() => setStep(4)}>Lanjut ke Review »</button>
           </div>
