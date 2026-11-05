@@ -68,6 +68,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [kolFill, setKolFill] = useState('');
   const [campFill, setCampFill] = useState('Expert Search Kalodata');
+  const [modeFill, setModeFill] = useState<'' | ImportType>('');
   const [showAll, setShowAll] = useState(false);
   const [droppedCount, setDroppedCount] = useState(0);
 
@@ -121,6 +122,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
 
   const applyKol = () => { if (kolFill) setRows(rows.map(row => ({ ...row, sourceKol: kolFill as PRow['sourceKol'] }))); };
   const applyCamp = () => { if (campFill.trim()) setRows(rows.map(row => ({ ...row, campaign: campFill.trim() }))); };
+  const applyModeAll = (mode: ImportType) => { setRows(rows.map(row => ({ ...row, type: mode }))); };
 
   const clearAll = () => {
     if (!rows.length) return;
@@ -142,7 +144,14 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       for (let r = 0; r < lines.length; r++) {
         const destRow = startIndex + r;
         while (next.length <= destRow) next.push(emptyRow());
-        const cells = lines[r].split(/[\t;]|\s{2,}/).map(c => c.trim());
+        let cells = lines[r].split(/[\t;]|\s{2,}/).map(c => c.trim());
+        // Lewati kolom angka di depan (mis. ID/rank dari Excel) saat menempel ke kolom username,
+        // supaya kolom tidak pernah bergeser meski kolom ID ikut tersalin.
+        if (fieldOrder[startCol] === 'username') {
+          let ci = 0;
+          while (ci < cells.length && /^\d+(?:[.,]\d+)?$/.test(cells[ci])) ci++;
+          if (ci > 0) cells = cells.slice(ci);
+        }
         for (let c = 0; c < cells.length; c++) {
           const raw = cells[c];
           if (!raw) continue;
@@ -187,8 +196,8 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
         tiktok: `@${row.username}`,
         email: row.email,
         revenue: parseNumber(row.revenue),
-        itemSold: parseNumber(row.itemSold),
-        followers: parseNumber(row.followers),
+        itemSold: Math.round(parseNumber(row.itemSold) ?? 0),
+        followers: Math.round(parseNumber(row.followers) ?? 0),
         sourceRevenueKol: row.sourceKol || null,
         campaign: row.campaign || null,
         type: row.type,
@@ -301,6 +310,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
           <div className="pipeline-fill">
             <label>Source Revenue<select value={kolFill} onChange={e => setKolFill(e.target.value)}><option value="">—</option>{REVENUE_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}</select><button className="secondary" onClick={applyKol}>Apply ke semua</button></label>
             <label>Campaign<input value={campFill} onChange={e => setCampFill(e.target.value)} placeholder="contoh: campaign name" /><button className="secondary" onClick={applyCamp}>Apply ke semua</button></label>
+            <label>Mode<select value={modeFill} onChange={e => setModeFill(e.target.value as ImportType)}><option value="">—</option><option value="Listing">Listing</option><option value="Hijack">Hijack</option></select><button className="secondary" onClick={() => { if (modeFill) applyModeAll(modeFill); }}>Apply ke semua</button></label>
           </div>
           <div className="table-wrap"><table className="pipeline-grid"><thead><tr><th>Username</th><th>Revenue</th><th>Item sold</th><th>Followers</th><th>Source Revenue</th><th>Campaign</th><th>Mode</th></tr></thead><tbody>
             {Array.from({ length: Math.max(Math.min(rows.length, showAll ? rows.length : 5), 1) }).map((_, i) => {

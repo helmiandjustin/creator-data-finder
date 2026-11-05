@@ -31,7 +31,8 @@ export function parseNumber(raw: string): number | null {
   else if (/[bB]$/.test(cleaned)) { mult = 1e9; digits = cleaned.slice(0, -1); }
   const value = Number.parseFloat(digits.replace(/,/g, ''));
   if (Number.isNaN(value)) return null;
-  return Math.round(value * mult);
+  // Pertahankan desimal (mis. "$741.24" -> 741.24, bukan dibulatkan jadi 741).
+  return Number((value * mult).toFixed(2));
 }
 
 export type ParsedScrapeRow = { username: string; revenue: string; itemSold: string; followers: string };

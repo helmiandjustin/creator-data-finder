@@ -8,7 +8,7 @@ export type HijackInput = { date: string; tiktok: string; email: string };
 export type HijackStats = { total: number; matchedReplies: number; unknownReplies: number; byBrand: Array<{ target: string; total: number; replies: number }>; byProduct: Array<{ target: string; total: number; replies: number }> };
 export type DailyCounts = { date: string; listing: number; hijack: number };
 export type MonthlyCounts = { month: string; listing: number; hijack: number };
-export type ActivityRow = { id: string; username: string; email: string; type: 'Listing' | 'Hijack'; campaign: string; sourceRevenue: string; date: string };
+export type ActivityRow = { id: string; username: string; email: string; type: 'Listing' | 'Hijack'; campaign: string; sourceRevenue: string; date: string; revenue?: string; itemSold?: string; followers?: string };
 export type ActivityResult = { rows: ActivityRow[]; counts: { listing: number; hijack: number } };
 
 const client = () => { if (!supabase) throw new Error('Supabase belum dikonfigurasi.'); return supabase; };
@@ -173,30 +173,49 @@ export async function getDailyCounts(date: string): Promise<DailyCounts> {
   return { date, listing: listing.count ?? 0, hijack: hijack.count ?? 0 };
 }
 
+const ALL_PAGE = 1000;
+type PageResult = { rows: any[]; count: number; error: any };
+const toPage = (res: { data?: any[] | null; count?: number | null; error?: any }): PageResult => ({ rows: res.data ?? [], count: res.count ?? 0, error: res.error ?? null });
+const fetchAllPages = async (build: (from: number, to: number) => any): Promise<PageResult> => {
+  const all: any[] = [];
+  let total = 0;
+  let error: any = null;
+  let from = 0;
+  do {
+    const res = await build(from, from + ALL_PAGE - 1);
+    if (res.error) { error = res.error; break; }
+    all.push(...(res.data ?? []));
+    total = res.count ?? all.length;
+    from += ALL_PAGE;
+  } while (from < total);
+  return { rows: all, count: total, error };
+};
+
 export async function getActivity(date: string, type: 'Both' | 'Listing' | 'Hijack' = 'Both', limit = 5): Promise<ActivityResult> {
   const db = client();
   let hasExtras = true;
   const runListing = async () => {
-    const base = db.from('creators').select('id,record_date,tiktok_link,email,campaign,source_revenue_kol', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false });
-    const res = limit > 0 ? await base.limit(limit) : await base;
+    const build = (from: number, to: number) => db.from('creators').select('id,record_date,tiktok_link,email,campaign,source_revenue_kol,revenue,item_sold,followers', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false }).range(from, to);
+    const res = limit > 0 ? toPage(await build(0, limit - 1)) : await fetchAllPages(build);
     // Kolom baru belum ada (migrasi belum dijalankan) → ulangi tanpa kolom baru.
     if (res.error && res.error.code === '42703') {
       hasExtras = false;
-      const fallback = db.from('creators').select('id,record_date,tiktok_link,email', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false });
-      return limit > 0 ? await fallback.limit(limit) : await fallback;
+      const fb = (from: number, to: number) => db.from('creators').select('id,record_date,tiktok_link,email', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false }).range(from, to);
+      return limit > 0 ? toPage(await fb(0, limit - 1)) : await fetchAllPages(fb);
     }
     return res;
   };
-  const hijackBase = db.from('hijack_records').select('id,record_date,tiktok_link,email,scope,target', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false });
-  const listingQuery = type === 'Hijack' ? Promise.resolve({ data: [], count: 0, error: null }) : runListing();
-  const hijackQuery = type === 'Listing' ? Promise.resolve({ data: [], count: 0, error: null }) : (limit > 0 ? hijackBase.limit(limit) : hijackBase);
+  const hijackBuild = (from: number, to: number) => db.from('hijack_records').select('id,record_date,tiktok_link,email,scope,target', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false }).range(from, to);
+  const listingQuery = type === 'Hijack' ? Promise.resolve({ rows: [], count: 0, error: null }) : runListing();
+  const hijackQuery = type === 'Listing' ? Promise.resolve({ rows: [], count: 0, error: null }) : (limit > 0 ? toPage(await hijackBuild(0, limit - 1)) : fetchAllPages(hijackBuild));
   const [listing, hijack] = await Promise.all([listingQuery, hijackQuery]);
   if (listing.error) throw listing.error;
   if (hijack.error) throw hijack.error;
   const username = (value: string | null) => normalizeTikTok(value ?? '') || '—';
-  const rows = [
-    ...(listing.data ?? []).map((row: any) => ({ id: `listing-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Listing' as const, campaign: hasExtras ? (row.campaign || '—') : '—', sourceRevenue: hasExtras ? (row.source_revenue_kol || '—') : '—', date: row.record_date ?? '—' })),
-    ...(hijack.data ?? []).map(row => ({ id: `hijack-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Hijack' as const, campaign: `${row.scope ?? 'Campaign'}: ${row.target ?? '—'}`, sourceRevenue: '—', date: row.record_date ?? '—' }))
+  const num = (value: unknown) => (value == null || value === '' ? '' : String(value));
+  const rows: ActivityRow[] = [
+    ...(listing.rows ?? []).map((row: any) => ({ id: `listing-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Listing' as const, campaign: hasExtras ? (row.campaign || '—') : '—', sourceRevenue: hasExtras ? (row.source_revenue_kol || '—') : '—', date: row.record_date ?? '—', revenue: hasExtras ? num(row.revenue) : '', itemSold: hasExtras ? num(row.item_sold) : '', followers: hasExtras ? num(row.followers) : '' })),
+    ...(hijack.rows ?? []).map(row => ({ id: `hijack-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Hijack' as const, campaign: `${row.scope ?? 'Campaign'}: ${row.target ?? '—'}`, sourceRevenue: '—', date: row.record_date ?? '—', revenue: '', itemSold: '', followers: '' }))
   ];
   return { rows, counts: { listing: listing.count ?? 0, hijack: hijack.count ?? 0 } };
 }
