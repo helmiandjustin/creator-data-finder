@@ -145,7 +145,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
     setRows([]); setEmailRows([]); setInclude({}); setChecked(false); setDroppedCount(0);
   };
 
-  const applyGridPaste = (text: string, colKey: string, fieldOrder: string[], startIndex: number, setList: React.Dispatch<React.SetStateAction<PRow[]>>) => {
+  const applyGridPaste = (text: string, colKey: string, fieldOrder: string[], startIndex: number, setList: React.Dispatch<React.SetStateAction<PRow[]>>, opts?: { dedup?: boolean }) => {
     const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
     if (!lines.length) return;
     const startCol = fieldOrder.indexOf(colKey);
@@ -153,9 +153,11 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
     setList(prev => {
       const next = [...prev];
       let filled = 0;
+      let skipped = 0;
+      let writeIdx = startIndex;
+      // Dedup per username (khusus step Email): lewati baris yang username-nya sudah ada.
+      const seen = opts?.dedup ? new Set(prev.map(r => cleanUsername(r.username)).filter(Boolean)) : null;
       for (let r = 0; r < lines.length; r++) {
-        const destRow = startIndex + r;
-        while (next.length <= destRow) next.push(emptyRow());
         let cells = lines[r].split(/[\t;]|\s{2,}/).map(c => c.trim());
         // Lewati kolom angka di depan (mis. ID/rank dari Excel) saat menempel ke kolom username,
         // supaya kolom tidak pernah bergeser meski kolom ID ikut tersalin.
@@ -167,6 +169,15 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
         // Di step Email: kalau blok berkolom banyak (Username+Email), petakan sebagai pasangan penuh
         // dari kolom 0 — terlepas dari sel mana yang diklik — supaya tidak salah geser.
         const baseCol = (fieldOrder === FIELD_ORDER_EMAIL && cells.length > 1) ? 0 : startCol;
+        const userIdx = fieldOrder.indexOf('username');
+        const unameRaw = userIdx >= baseCol ? cells[userIdx - baseCol] : '';
+        const uname = cleanUsername(unameRaw || '');
+        if (seen && uname) {
+          if (seen.has(uname)) { skipped++; continue; }
+          seen.add(uname);
+        }
+        const destRow = writeIdx;
+        while (next.length <= destRow) next.push(emptyRow());
         for (let c = 0; c < cells.length; c++) {
           const raw = cells[c];
           if (!raw) continue;
@@ -186,8 +197,11 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
           next[destRow] = row;
           filled++;
         }
+        writeIdx++;
       }
-      setNotice(`${filled} sel terisi mulai baris ${startIndex + 1}.`);
+      let msg = `${filled} sel terisi mulai baris ${startIndex + 1}.`;
+      if (opts?.dedup && skipped > 0) msg += ` · ${skipped} duplikat username dilewati.`;
+      setNotice(msg);
       return next;
     });
   };
@@ -203,7 +217,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
     const text = e.clipboardData.getData('text');
     if (!text.trim()) return;
     e.preventDefault();
-    applyGridPaste(text, colKey, fieldOrder, startIndex, setEmailRows);
+    applyGridPaste(text, colKey, fieldOrder, startIndex, setEmailRows, { dedup: true });
   };
 
   const exportUsernames = async () => {
