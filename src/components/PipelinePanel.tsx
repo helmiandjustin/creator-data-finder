@@ -152,10 +152,13 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
           while (ci < cells.length && /^\d+(?:[.,]\d+)?$/.test(cells[ci])) ci++;
           if (ci > 0) cells = cells.slice(ci);
         }
+        // Di step Email: kalau blok berkolom banyak (Username+Email), petakan sebagai pasangan penuh
+        // dari kolom 0 — terlepas dari sel mana yang diklik — supaya tidak salah geser.
+        const baseCol = (fieldOrder === FIELD_ORDER_EMAIL && cells.length > 1) ? 0 : startCol;
         for (let c = 0; c < cells.length; c++) {
           const raw = cells[c];
           if (!raw) continue;
-          const field = fieldOrder[startCol + c];
+          const field = fieldOrder[baseCol + c];
           if (!field) continue;
           const row = { ...next[destRow] };
           switch (field) {
