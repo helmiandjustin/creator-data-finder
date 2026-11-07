@@ -164,13 +164,15 @@ export async function getHijackStats(): Promise<HijackStats> {
 
 export async function getDailyCounts(date: string): Promise<DailyCounts> {
   const db = client();
-  const [listing, hijack] = await Promise.all([
-    db.from('creators').select('id', { count: 'exact', head: true }).eq('record_date', date),
+  const [listing, hijackCreators, hijack] = await Promise.all([
+    db.from('creators').select('id', { count: 'exact', head: true }).eq('record_date', date).or('type.is.null,type.neq.Hijack'),
+    db.from('creators').select('id', { count: 'exact', head: true }).eq('record_date', date).eq('type', 'Hijack'),
     db.from('hijack_records').select('id', { count: 'exact', head: true }).eq('record_date', date)
   ]);
   if (listing.error) throw listing.error;
+  if (hijackCreators.error) throw hijackCreators.error;
   if (hijack.error) throw hijack.error;
-  return { date, listing: listing.count ?? 0, hijack: hijack.count ?? 0 };
+  return { date, listing: listing.count ?? 0, hijack: (hijackCreators.count ?? 0) + (hijack.count ?? 0) };
 }
 
 const ALL_PAGE = 1000;
@@ -194,30 +196,72 @@ const fetchAllPages = async (build: (from: number, to: number) => any): Promise<
 export async function getActivity(date: string, type: 'Both' | 'Listing' | 'Hijack' = 'Both', limit = 5): Promise<ActivityResult> {
   const db = client();
   let hasExtras = true;
-  const runListing = async () => {
-    const build = (from: number, to: number) => db.from('creators').select('id,record_date,tiktok_link,email,campaign,source_revenue_kol,revenue,item_sold,followers', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false }).range(from, to);
-    const res = limit > 0 ? toPage(await build(0, limit - 1)) : await fetchAllPages(build);
+
+  // Query tabel creators (master/listing), dibatasi sesuai type tersimpan.
+  const listBuild = (from: number, to: number, t?: 'Listing' | 'Hijack') => {
+    let q = db.from('creators').select('id,record_date,tiktok_link,email,campaign,source_revenue_kol,revenue,item_sold,followers,type', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false });
+    if (t === 'Hijack') q = q.eq('type', 'Hijack');
+    else if (t === 'Listing') q = q.or('type.is.null,type.neq.Hijack');
+    return q.range(from, to);
+  };
+  const runList = async (t: 'Listing' | 'Hijack') => {
+    const res = limit > 0 ? toPage(await listBuild(0, limit - 1, t)) : await fetchAllPages((from, to) => listBuild(from, to, t));
     // Kolom baru belum ada (migrasi belum dijalankan) → ulangi tanpa kolom baru.
     if (res.error && res.error.code === '42703') {
       hasExtras = false;
-      const fb = (from: number, to: number) => db.from('creators').select('id,record_date,tiktok_link,email', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false }).range(from, to);
-      return limit > 0 ? toPage(await fb(0, limit - 1)) : await fetchAllPages(fb);
+      const fb = (from: number, to: number, ft: 'Listing' | 'Hijack') => {
+        let q = db.from('creators').select('id,record_date,tiktok_link,email,type', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false });
+        if (ft === 'Hijack') q = q.eq('type', 'Hijack');
+        else if (ft === 'Listing') q = q.or('type.is.null,type.neq.Hijack');
+        return q.range(from, to);
+      };
+      return limit > 0 ? toPage(await fb(0, limit - 1, t)) : await fetchAllPages((from, to) => fb(from, to, t));
     }
     return res;
   };
+
   const hijackBuild = (from: number, to: number) => db.from('hijack_records').select('id,record_date,tiktok_link,email,scope,target', { count: 'exact' }).eq('record_date', date).order('id', { ascending: false }).range(from, to);
-  const listingQuery = type === 'Hijack' ? Promise.resolve({ rows: [], count: 0, error: null }) : runListing();
-  const hijackQuery = type === 'Listing' ? Promise.resolve({ rows: [], count: 0, error: null }) : (limit > 0 ? toPage(await hijackBuild(0, limit - 1)) : fetchAllPages(hijackBuild));
-  const [listing, hijack] = await Promise.all([listingQuery, hijackQuery]);
+  const runHijack = async () => (limit > 0 ? toPage(await hijackBuild(0, limit - 1)) : fetchAllPages(hijackBuild));
+
+  const wantListing = type !== 'Hijack';
+  const wantHijack = type !== 'Listing';
+
+  const listing = wantListing ? await runList('Listing') : { rows: [], count: 0, error: null };
+  const hijackCreators = wantHijack ? await runList('Hijack') : { rows: [], count: 0, error: null };
+  const hijackRecords = wantHijack ? await runHijack() : { rows: [], count: 0, error: null };
+
   if (listing.error) throw listing.error;
-  if (hijack.error) throw hijack.error;
+  if (hijackCreators.error) throw hijackCreators.error;
+  if (hijackRecords.error) throw hijackRecords.error;
+
   const username = (value: string | null) => normalizeTikTok(value ?? '') || '—';
   const num = (value: unknown) => (value == null || value === '' ? '' : String(value));
+  const mapListing = (row: any, t: 'Listing' | 'Hijack') => ({
+    id: `${t.toLowerCase()}-${row.id}`,
+    username: username(row.tiktok_link),
+    email: row.email ?? '—',
+    type: t,
+    campaign: hasExtras ? (row.campaign || '—') : '—',
+    sourceRevenue: hasExtras ? (row.source_revenue_kol || '—') : '—',
+    date: row.record_date ?? '—',
+    revenue: hasExtras ? num(row.revenue) : '',
+    itemSold: hasExtras ? num(row.item_sold) : '',
+    followers: hasExtras ? num(row.followers) : '',
+  });
+
   const rows: ActivityRow[] = [
-    ...(listing.rows ?? []).map((row: any) => ({ id: `listing-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Listing' as const, campaign: hasExtras ? (row.campaign || '—') : '—', sourceRevenue: hasExtras ? (row.source_revenue_kol || '—') : '—', date: row.record_date ?? '—', revenue: hasExtras ? num(row.revenue) : '', itemSold: hasExtras ? num(row.item_sold) : '', followers: hasExtras ? num(row.followers) : '' })),
-    ...(hijack.rows ?? []).map(row => ({ id: `hijack-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Hijack' as const, campaign: `${row.scope ?? 'Campaign'}: ${row.target ?? '—'}`, sourceRevenue: '—', date: row.record_date ?? '—', revenue: '', itemSold: '', followers: '' }))
+    ...(listing.rows ?? []).map((row: any) => mapListing(row, 'Listing')),
+    ...(hijackCreators.rows ?? []).map((row: any) => mapListing(row, 'Hijack')),
+    ...(hijackRecords.rows ?? []).map(row => ({ id: `hijack-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Hijack' as const, campaign: `${row.scope ?? 'Campaign'}: ${row.target ?? '—'}`, sourceRevenue: '—', date: row.record_date ?? '—', revenue: '', itemSold: '', followers: '' }))
   ];
-  return { rows, counts: { listing: listing.count ?? 0, hijack: hijack.count ?? 0 } };
+
+  return {
+    rows,
+    counts: {
+      listing: type === 'Hijack' ? 0 : listing.count,
+      hijack: type === 'Listing' ? 0 : (hijackCreators.count + hijackRecords.count),
+    },
+  };
 }
 
 export async function getMonthlyCounts(month: string): Promise<MonthlyCounts> {
@@ -226,11 +270,13 @@ export async function getMonthlyCounts(month: string): Promise<MonthlyCounts> {
   if (!year || !monthNumber) return { month, listing: 0, hijack: 0 };
   const start = `${month}-01`;
   const next = monthNumber === 12 ? `${year + 1}-01-01` : `${year}-${String(monthNumber + 1).padStart(2, '0')}-01`;
-  const [listing, hijack] = await Promise.all([
-    db.from('creators').select('id', { count: 'exact', head: true }).gte('record_date', start).lt('record_date', next),
+  const [listing, hijackCreators, hijack] = await Promise.all([
+    db.from('creators').select('id', { count: 'exact', head: true }).gte('record_date', start).lt('record_date', next).or('type.is.null,type.neq.Hijack'),
+    db.from('creators').select('id', { count: 'exact', head: true }).gte('record_date', start).lt('record_date', next).eq('type', 'Hijack'),
     db.from('hijack_records').select('id', { count: 'exact', head: true }).gte('record_date', start).lt('record_date', next)
   ]);
   if (listing.error) throw listing.error;
+  if (hijackCreators.error) throw hijackCreators.error;
   if (hijack.error) throw hijack.error;
-  return { month, listing: listing.count ?? 0, hijack: hijack.count ?? 0 };
+  return { month, listing: listing.count ?? 0, hijack: (hijackCreators.count ?? 0) + (hijack.count ?? 0) };
 }
