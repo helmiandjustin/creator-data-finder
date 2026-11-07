@@ -71,8 +71,19 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
   const [modeFill, setModeFill] = useState<'' | ImportType>('');
   const [showAll, setShowAll] = useState(false);
   const [droppedCount, setDroppedCount] = useState(0);
+  const [emailRows, setEmailRows] = useState<PRow[]>([]);
 
-  useEffect(() => { if (rows.length) setInclude(rows.reduce<Record<number, boolean>>((acc, row, i) => { acc[i] = row.status === 'clean'; return acc; }, {})); }, [rows]);
+  const emptyRow = (): PRow => ({ username: '', email: '', revenue: '', itemSold: '', followers: '', sourceKol: '' as PRow['sourceKol'], campaign: '', type: 'Listing' as ImportType, status: 'unknown' as RowStatus, officePics: [] as string[] });
+
+  // Gabungkan pasangan email (dari step 4) dengan detail dari step 1–3 berdasarkan username.
+  const mergedRows: PRow[] = emailRows.map(em => {
+    const u = cleanUsername(em.username);
+    const detail = rows.find(r => cleanUsername(r.username) === u);
+    if (!detail) return { ...emptyRow(), username: em.username, email: em.email, status: 'unknown' as RowStatus };
+    return { ...detail, email: em.email };
+  });
+
+  useEffect(() => { if (mergedRows.length) setInclude(mergedRows.reduce<Record<number, boolean>>((acc, row, i) => { acc[i] = row.status === 'clean'; return acc; }, {})); }, [mergedRows]);
   useEffect(() => { setNotice(''); setShowAll(false); }, [step]);
 
   const campaignOptions = (catalog?.brands ?? []).flatMap(brand => [brand.name, ...brand.products.map(product => `${brand.name} · ${product}`)]);
@@ -111,9 +122,13 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
     } catch (e) { setError(errorText(e)); } finally { setChecking(false); }
   };
 
-  const emptyRow = (): PRow => ({ username: '', email: '', revenue: '', itemSold: '', followers: '', sourceKol: '' as PRow['sourceKol'], campaign: '', type: 'Listing' as ImportType, status: 'unknown' as RowStatus, officePics: [] as string[] });
-
   const updateRow = (index: number, patch: Partial<PRow>) => setRows(prev => {
+    const next = [...prev];
+    while (next.length <= index) next.push(emptyRow());
+    next[index] = { ...next[index], ...patch };
+    return next;
+  });
+  const updateEmailRow = (index: number, patch: Partial<PRow>) => setEmailRows(prev => {
     const next = [...prev];
     while (next.length <= index) next.push(emptyRow());
     next[index] = { ...next[index], ...patch };
@@ -125,20 +140,17 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
   const applyModeAll = (mode: ImportType) => { setRows(rows.map(row => ({ ...row, type: mode }))); };
 
   const clearAll = () => {
-    if (!rows.length) return;
+    if (!rows.length && !emailRows.length) return;
     if (!window.confirm('Kosongkan semua baris? Data yang belum disimpan akan hilang.')) return;
-    setRows([]); setInclude({}); setChecked(false); setDroppedCount(0);
+    setRows([]); setEmailRows([]); setInclude({}); setChecked(false); setDroppedCount(0);
   };
 
-  const handleGridPaste = (e: React.ClipboardEvent<HTMLInputElement>, colKey: string, fieldOrder: string[], startIndex: number) => {
-    const text = e.clipboardData.getData('text');
-    if (!text.trim()) return;
-    e.preventDefault();
+  const applyGridPaste = (text: string, colKey: string, fieldOrder: string[], startIndex: number, setList: React.Dispatch<React.SetStateAction<PRow[]>>) => {
     const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
     if (!lines.length) return;
     const startCol = fieldOrder.indexOf(colKey);
     if (startCol < 0) return;
-    setRows(prev => {
+    setList(prev => {
       const next = [...prev];
       let filled = 0;
       for (let r = 0; r < lines.length; r++) {
@@ -180,15 +192,28 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
     });
   };
 
+  const handleGridPaste = (e: React.ClipboardEvent<HTMLInputElement>, colKey: string, fieldOrder: string[], startIndex: number) => {
+    const text = e.clipboardData.getData('text');
+    if (!text.trim()) return;
+    e.preventDefault();
+    applyGridPaste(text, colKey, fieldOrder, startIndex, setRows);
+  };
+
+  const handleEmailGridPaste = (e: React.ClipboardEvent<HTMLInputElement>, colKey: string, fieldOrder: string[], startIndex: number) => {
+    const text = e.clipboardData.getData('text');
+    if (!text.trim()) return;
+    e.preventDefault();
+    applyGridPaste(text, colKey, fieldOrder, startIndex, setEmailRows);
+  };
+
   const exportUsernames = async () => {
     const list = rows.map(row => row.username);
     const ok = await copyText(list.join('\n'));
     setNotice(ok ? `${list.length} username disalin ke clipboard.` : 'Gagal menyalin ke clipboard.');
   };
 
-  const completeRows = rows.filter((row, i) => include[i] === true && rowComplete(row));
-  const checkedIncomplete = rows.filter((row, i) => include[i] === true && !rowComplete(row));
-  const missingEmail = rows.filter(row => row.status === 'clean' && !isValidEmail(row.email)).length;
+  const completeRows = mergedRows.filter((row, i) => include[i] === true && rowComplete(row));
+  const checkedIncomplete = mergedRows.filter((row, i) => include[i] === true && !rowComplete(row));
 
   const save = async () => {
     setBusy(true); setError('');
@@ -209,7 +234,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       if (!toSave.length) { setError('Tidak ada baris lengkap untuk disimpan (semua butuh email + revenue + item sold).'); setBusy(false); return; }
       const result = await savePipelineRows(toSave, done => setProgress({ done, total: toSave.length }));
       setNotice(`${result.inserted} baru disimpan · ${result.updated} diperbarui.`);
-      setRows([]); setStep(0); setProgress({ done: 0, total: 0 });
+      setRows([]); setEmailRows([]); setStep(0); setProgress({ done: 0, total: 0 });
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
 
@@ -357,35 +382,35 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       {step === 3 && (
         <div className="card">
           <h2>4 · Cari Email</h2>
-          <p>Salin hasil dari tool cari email kamu (kolom username + email), lalu tempel langsung ke grid di bawah — nilai otomatis mengisi baris (fill down), sama seperti Tempel & Parse. Hanya baris yang kamu tempel yang terisi, jadi jumlahnya pasti exact.</p>
+          <p>Tempel pasangan <b>username + email</b> dari tool cari email kamu (hanya yang punya email). Grid mulai kosong — yang tanpa email otomatis di-exclude saat review.</p>
           <div className="grid-actions">
             <button className="secondary" onClick={exportUsernames}>Copy semua username</button>
           </div>
           <div className="table-wrap"><table className="pipeline-grid"><thead><tr><th>Username</th><th>Email</th></tr></thead><tbody>
-            {Array.from({ length: Math.max(Math.min(rows.length, showAll ? rows.length : 5), 1) }).map((_, i) => {
-              const row = rows[i] ?? emptyRow();
+            {Array.from({ length: Math.max(Math.min(emailRows.length, showAll ? emailRows.length : 5), 1) }).map((_, i) => {
+              const row = emailRows[i] ?? emptyRow();
               return (
                 <tr key={i}>
-                  <td className="p-username"><input value={row.username} onChange={e => updateRow(i, { username: e.target.value })} onPaste={e => handleGridPaste(e, 'username', FIELD_ORDER_EMAIL, i)} placeholder="@username" /></td>
-                  <td><input value={row.email} onChange={e => updateRow(i, { email: e.target.value })} onPaste={e => handleGridPaste(e, 'email', FIELD_ORDER_EMAIL, i)} placeholder="email" /></td>
+                  <td className="p-username"><input value={row.username} onChange={e => updateEmailRow(i, { username: e.target.value })} onPaste={e => handleEmailGridPaste(e, 'username', FIELD_ORDER_EMAIL, i)} placeholder="@username" /></td>
+                  <td><input value={row.email} onChange={e => updateEmailRow(i, { email: e.target.value })} onPaste={e => handleEmailGridPaste(e, 'email', FIELD_ORDER_EMAIL, i)} placeholder="email" /></td>
                 </tr>
               );
             })}
-            {rows.length > 0 && (
+            {emailRows.length > 0 && (
               <tr className="p-append-row">
-                <td><input onPaste={e => handleGridPaste(e, 'username', FIELD_ORDER_EMAIL, rows.length)} placeholder="@username +" /></td>
-                <td><input onPaste={e => handleGridPaste(e, 'email', FIELD_ORDER_EMAIL, rows.length)} placeholder="email +" /></td>
+                <td><input onPaste={e => handleEmailGridPaste(e, 'username', FIELD_ORDER_EMAIL, emailRows.length)} placeholder="@username +" /></td>
+                <td><input onPaste={e => handleEmailGridPaste(e, 'email', FIELD_ORDER_EMAIL, emailRows.length)} placeholder="email +" /></td>
               </tr>
             )}
           </tbody></table></div>
-          <div className="pipeline-summary"><span><b>{rows.filter(r => r.email).length}</b> punya email</span><span><b>{missingEmail}</b> belum (akan ditandai)</span></div>
+          <div className="pipeline-summary"><span><b>{emailRows.length}</b> pasangan (dengan email)</span><span><b>{mergedRows.filter(r => r.username).length}</b> tersambung ke detail step 1–3</span></div>
           <div className="grid-actions">
-            {rows.length > 5 && (
-              <button className="secondary" onClick={() => setShowAll(v => !v)}>{showAll ? 'Tampilkan lebih sedikit' : `Tampilkan semua (${rows.length})`}</button>
+            {emailRows.length > 5 && (
+              <button className="secondary" onClick={() => setShowAll(v => !v)}>{showAll ? 'Tampilkan lebih sedikit' : `Tampilkan semua (${emailRows.length})`}</button>
             )}
-            {rows.length > 0 && <button className="secondary" onClick={clearAll}>Clear (kosongkan semua)</button>}
+            {emailRows.length > 0 && <button className="secondary" onClick={clearAll}>Clear (kosongkan semua)</button>}
             <button className="secondary" onClick={() => setStep(2)}>« Kembali</button>
-            <button onClick={() => setStep(4)}>Lanjut ke Review »</button>
+            <button onClick={() => setStep(4)} disabled={!emailRows.length}>Lanjut ke Review »</button>
           </div>
         </div>
       )}
@@ -393,14 +418,14 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       {step === 4 && (
         <div className="card">
           <h2>5 · Review & Simpan</h2>
-          <p>Baris dengan <b>email kosong / "not found"</b> atau revenue/item sold kosong <b>otomatis dilewati</b> (tidak tersimpan). Centang baris yang ingin disimpan. Duplikat sudah dibuang otomatis di tahap sebelumnya.</p>
+          <p>Review gabungan detail (<b>revenue</b>, <b>item sold</b>, dst.) dengan email yang kamu tempel di step 4. Baris tanpa email / detail tidak lengkap <b>otomatis dilewati</b>. Centang baris yang ingin disimpan.</p>
           <div className="pipeline-summary">
-            <span><b>{rows.length}</b> total</span>
+            <span><b>{mergedRows.length}</b> total</span>
             <span><b>{completeRows.length}</b> siap disimpan</span>
             {checkedIncomplete.length > 0 && <span className="p-warn"><b>{checkedIncomplete.length}</b> kurang lengkap (dilewati)</span>}
           </div>
           <div className="table-wrap"><table className="pipeline-grid"><thead><tr><th>✔</th><th>Username</th><th>Email</th><th>Revenue</th><th>Item sold</th><th>Followers</th><th>KOL</th><th>Campaign</th><th>Mode</th></tr></thead><tbody>
-            {previewRows(rows).map((row, i) => {
+            {previewRows(mergedRows).map((row, i) => {
               const complete = rowComplete(row);
               return (
                 <tr key={i} className={complete ? '' : 'p-incomplete'}>
@@ -417,7 +442,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
               );
             })}
           </tbody></table></div>
-          {showMoreFooter(rows)}
+          {showMoreFooter(mergedRows)}
           <div className="grid-actions">
             <button className="secondary" onClick={() => setStep(3)}>« Kembali</button>
             <button onClick={save} disabled={busy}>{busy ? 'Menyimpan…' : `Simpan ${completeRows.length} baris`}</button>
