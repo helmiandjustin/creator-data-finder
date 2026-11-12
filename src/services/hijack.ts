@@ -8,7 +8,7 @@ export type HijackInput = { date: string; tiktok: string; email: string };
 export type HijackStats = { total: number; matchedReplies: number; unknownReplies: number; byBrand: Array<{ target: string; total: number; replies: number }>; byProduct: Array<{ target: string; total: number; replies: number }> };
 export type DailyCounts = { date: string; listing: number; hijack: number };
 export type MonthlyCounts = { month: string; listing: number; hijack: number };
-export type ActivityRow = { id: string; username: string; email: string; type: 'Listing' | 'Hijack'; campaign: string; sourceRevenue: string; date: string; revenue?: string; itemSold?: string; followers?: string };
+export type ActivityRow = { id: string; source: 'creators' | 'hijack_records'; username: string; email: string; type: 'Listing' | 'Hijack'; campaign: string; sourceRevenue: string; date: string; revenue?: string; itemSold?: string; followers?: string };
 export type ActivityResult = { rows: ActivityRow[]; counts: { listing: number; hijack: number } };
 
 const client = () => { if (!supabase) throw new Error('Supabase belum dikonfigurasi.'); return supabase; };
@@ -238,6 +238,7 @@ export async function getActivity(date: string, type: 'Both' | 'Listing' | 'Hija
   const num = (value: unknown) => (value == null || value === '' ? '' : String(value));
   const mapListing = (row: any, t: 'Listing' | 'Hijack') => ({
     id: `${t.toLowerCase()}-${row.id}`,
+    source: 'creators' as const,
     username: username(row.tiktok_link),
     email: row.email ?? '—',
     type: t,
@@ -252,7 +253,7 @@ export async function getActivity(date: string, type: 'Both' | 'Listing' | 'Hija
   const rows: ActivityRow[] = [
     ...(listing.rows ?? []).map((row: any) => mapListing(row, 'Listing')),
     ...(hijackCreators.rows ?? []).map((row: any) => mapListing(row, 'Hijack')),
-    ...(hijackRecords.rows ?? []).map(row => ({ id: `hijack-${row.id}`, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Hijack' as const, campaign: `${row.scope ?? 'Campaign'}: ${row.target ?? '—'}`, sourceRevenue: '—', date: row.record_date ?? '—', revenue: '', itemSold: '', followers: '' }))
+    ...(hijackRecords.rows ?? []).map(row => ({ id: `hijack-${row.id}`, source: 'hijack_records' as const, username: username(row.tiktok_link), email: row.email ?? '—', type: 'Hijack' as const, campaign: `${row.scope ?? 'Campaign'}: ${row.target ?? '—'}`, sourceRevenue: '—', date: row.record_date ?? '—', revenue: '', itemSold: '', followers: '' }))
   ];
 
   return {

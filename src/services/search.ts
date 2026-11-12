@@ -229,3 +229,59 @@ export async function getRecordStats(): Promise<RecordStats> {
   const daily = dates.filter(date => date >= currentStart && date < nextMonthStart).reduce<Record<string, number>>((result, date) => { result[date] = (result[date] ?? 0) + 1; return result; }, {});
   return { total, currentMonth, previousMonth, daily: Object.entries(daily).sort(([a], [b]) => a.localeCompare(b)).map(([date, count]) => ({ date, count })) };
 }
+
+export type EditableRecord = {
+  source: 'creators' | 'hijack_records';
+  id: number;
+  date: string;
+  username: string;
+  email: string;
+  campaign?: string;
+  revenue?: string;
+  itemSold?: string;
+  followers?: string;
+  sourceRevenueKol?: string;
+  type?: '' | 'Listing' | 'Hijack';
+};
+
+export async function updateSavedRecord(rec: EditableRecord): Promise<void> {
+  const db = client();
+  const link = rec.username.trim() ? `https://www.tiktok.com/@${rec.username.trim().replace(/^@/, '')}` : null;
+  const email = rec.email.trim() || null;
+
+  if (rec.source === 'hijack_records') {
+    let scope: string | null = null;
+    let target: string | null = null;
+    if (rec.campaign?.trim()) {
+      const idx = rec.campaign.indexOf(':');
+      if (idx >= 0) { scope = rec.campaign.slice(0, idx).trim(); target = rec.campaign.slice(idx + 1).trim(); }
+      else { scope = rec.campaign.trim(); target = ''; }
+    }
+    const { error } = await db.from('hijack_records').update({
+      record_date: normalizeDate(rec.date) || null,
+      tiktok_link: link,
+      email,
+      normalized_email: email ? normalizeEmail(email) : null,
+      normalized_tiktok: rec.username.trim() ? normalizeTikTok(rec.username.trim()) : null,
+      scope,
+      target,
+    }).eq('id', rec.id);
+    if (error) throw error;
+    return;
+  }
+
+  const { error } = await db.from('creators').update({
+    record_date: normalizeDate(rec.date) || null,
+    tiktok_link: link,
+    email,
+    normalized_email: email ? normalizeEmail(email) : null,
+    normalized_tiktok: rec.username.trim() ? normalizeTikTok(rec.username.trim()) : null,
+    campaign: rec.campaign?.trim() || null,
+    revenue: rec.revenue !== undefined && rec.revenue !== '' ? Number(rec.revenue) : null,
+    item_sold: rec.itemSold !== undefined && rec.itemSold !== '' ? Math.round(Number(rec.itemSold)) : null,
+    followers: rec.followers !== undefined && rec.followers !== '' ? Math.round(Number(rec.followers)) : null,
+    source_revenue_kol: rec.sourceRevenueKol?.trim() || null,
+    type: rec.type || null,
+  }).eq('id', rec.id);
+  if (error) throw error;
+}
