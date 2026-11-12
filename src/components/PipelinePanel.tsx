@@ -145,7 +145,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
     setRows([]); setEmailRows([]); setInclude({}); setChecked(false); setDroppedCount(0);
   };
 
-  const applyGridPaste = (text: string, colKey: string, fieldOrder: string[], startIndex: number, setList: React.Dispatch<React.SetStateAction<PRow[]>>, opts?: { dedup?: boolean }) => {
+  const applyGridPaste = (text: string, colKey: string, fieldOrder: string[], startIndex: number, setList: React.Dispatch<React.SetStateAction<PRow[]>>, opts?: { dedup?: boolean; filterPaid?: boolean }) => {
     const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
     if (!lines.length) return;
     const startCol = fieldOrder.indexOf(colKey);
@@ -154,11 +154,16 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       const next = [...prev];
       let filled = 0;
       let skipped = 0;
+      let skippedPaid = 0;
       let writeIdx = startIndex;
       // Dedup per username (khusus step Email): lewati baris yang username-nya sudah ada.
       const seen = opts?.dedup ? new Set(prev.map(r => cleanUsername(r.username)).filter(Boolean)) : null;
       for (let r = 0; r < lines.length; r++) {
-        let cells = lines[r].split(/[\t;]|\s{2,}/).map(c => c.trim());
+        const line = lines[r];
+        // Step Email: buang baris ber-label "paid" (mis. "cause he paid" / "he paid")
+        // supaya creator yang sudah bayar tidak ikut tersimpan.
+        if (opts?.filterPaid && /paid|cause he|bayar/i.test(line)) { skippedPaid++; continue; }
+        let cells = line.split(/[\t;]|\s{2,}/).map(c => c.trim());
         // Lewati kolom angka di depan (mis. ID/rank dari Excel) saat menempel ke kolom username,
         // supaya kolom tidak pernah bergeser meski kolom ID ikut tersalin.
         if (fieldOrder[startCol] === 'username') {
@@ -201,6 +206,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       }
       let msg = `${filled} sel terisi mulai baris ${startIndex + 1}.`;
       if (opts?.dedup && skipped > 0) msg += ` · ${skipped} duplikat username dilewati.`;
+      if (opts?.filterPaid && skippedPaid > 0) msg += ` · ${skippedPaid} baris ber-label "paid" dibuang.`;
       setNotice(msg);
       return next;
     });
@@ -217,7 +223,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
     const text = e.clipboardData.getData('text');
     if (!text.trim()) return;
     e.preventDefault();
-    applyGridPaste(text, colKey, fieldOrder, startIndex, setEmailRows, { dedup: true });
+    applyGridPaste(text, colKey, fieldOrder, startIndex, setEmailRows, { dedup: true, filterPaid: true });
   };
 
   const exportUsernames = async () => {
