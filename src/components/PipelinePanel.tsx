@@ -238,21 +238,20 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
   const save = async () => {
     setBusy(true); setError('');
     try {
-      // Cek duplikat member (email+username) lewat API kantor sebelum simpan.
-      let memberBlocked = 0;
+      // Cek duplikat email member (kantor) → PERINGATAN, bukan blokir.
+      // Username sudah diblokir di step Cek Duplikat; di sini cukup email.
+      let conflicting = 0;
       try {
-        const officeDup = await getOfficeDuplicates(
-          completeRows.map(row => row.username),
-          completeRows.map(row => row.email)
-        );
-        const keptRows = completeRows.filter(row => !officeDup.usernames.has(row.username) && !officeDup.emails.has(row.email.toLowerCase()));
-        memberBlocked = completeRows.length - keptRows.length;
-        var finalRows = keptRows;
+        const officeDup = await getOfficeDuplicates([], completeRows.map(row => row.email));
+        conflicting = completeRows.filter(row => officeDup.emails.has(row.email.toLowerCase())).length;
+        if (conflicting > 0) {
+          const ok = window.confirm(`${conflicting} baris punya email yang sama dengan member lain di kantor.\n\nTetap simpan?`);
+          if (!ok) { setBusy(false); return; }
+        }
       } catch {
         // Kalau API kantor gagal, tetap lanjut simpan (jangan blokir pipeline).
-        var finalRows = completeRows;
       }
-      const toSave: CreatorInput[] = finalRows.map(row => ({
+      const toSave: CreatorInput[] = completeRows.map(row => ({
         date: recordDate,
         creatorId: '',
         tiktok: `@${row.username}`,
@@ -267,7 +266,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       }));
       if (!toSave.length) { setError('Tidak ada baris lengkap untuk disimpan (semua butuh email + revenue + item sold).'); setBusy(false); return; }
       const result = await savePipelineRows(toSave, done => setProgress({ done, total: toSave.length }));
-      setNotice(`${result.inserted} baru disimpan · ${result.updated} diperbarui.${memberBlocked > 0 ? ` · ${memberBlocked} baris dibuang karena email/username sudah dipakai member lain.` : ''}`);
+      setNotice(`${result.inserted} baru disimpan · ${result.updated} diperbarui.${conflicting > 0 ? ` · ${conflicting} baris email sama dengan member lain (tetap disimpan).` : ''}`);
       setRows([]); setEmailRows([]); setStep(0); setProgress({ done: 0, total: 0 });
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
