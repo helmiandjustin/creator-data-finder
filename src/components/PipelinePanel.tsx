@@ -323,7 +323,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       {step === 1 && (
         <div className="card">
           <h2>2 · Cek Duplikat</h2>
-          <p>Memeriksa terhadap database justin (sendiri), kantor (usee-dashboard), dan <b>username member lain</b>. Duplikat (justin/kantor PIC aktif/member lain) otomatis dibuang; PIC resign (Ichwan/Safaa/Endah/Shafira) tidak dihitung sebagai duplikat.</p>
+          <p>Memeriksa terhadap database justin (sendiri), kantor (usee-dashboard), dan <b>username member lain</b>. Duplikat (justin/kantor PIC aktif/member lain) otomatis dibuang; PIC resign (Ichwan/Safaa/Endah/Shafira) tidak dihitung sebagai duplikat. <b>Yang lolos = 🆕 New KOL</b> (bersih, tidak ada riwayat di kantor/master) — aman untuk lanjut cari email & blast.</p>
           {!checked ? (
             <div className="pipeline-check-cta">
               <p className="muted" style={{ textAlign: 'left', padding: 0 }}>Jalankan untuk membuang baris duplikat sebelum lanjut.</p>
@@ -479,7 +479,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
 
 function statusLabel(status: RowStatus): string {
   switch (status) {
-    case 'clean': return 'Bersih';
+    case 'clean': return '🆕 New KOL';
     case 'dup': return 'Duplikat';
     default: return 'Belum dicek';
   }
