@@ -109,6 +109,17 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       const officeMap = await getOfficePics(usernames);
       // Cek username (id) yang sudah dipakai member lain di kantor (semua namespace).
       const officeDup = await getOfficeDuplicates(usernames, []);
+      // Cek juga ke cache hasil sync matching kantor (62.709 / riwayat): kalau ada
+      // dan statusnya bukan New KOL, berarti sudah dipakai → buang otomatis.
+      const matchSeen = new Set<string>();
+      try {
+        const uniq = [...new Set(usernames)];
+        for (let i = 0; i < uniq.length; i += 500) {
+          const chunk = uniq.slice(i, i + 500);
+          const { data } = await supabase!.from('match_cache').select('username,status').in('username', chunk);
+          for (const r of data ?? []) if (r.status && r.status !== 'new_kol') matchSeen.add(r.username);
+        }
+      } catch { /* bila API gagal, lewati (tidak memblokir pipeline) */ }
       let dropped = 0;
       let droppedMember = 0;
       const kept = rows.flatMap(row => {
@@ -116,8 +127,9 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
         const selfHit = selfUsernames.has(row.username) || (row.email && selfEmails.has(row.email));
         const offDup = isOfficeDuplicate(pics);
         const memberDup = officeDup.usernames.has(row.username);
-        // Semua duplikat (justin, kantor/PIC aktif, atau member lain) dibuang otomatis.
-        if (selfHit || offDup || memberDup) { dropped += 1; if (memberDup) droppedMember += 1; return []; }
+        const matchHit = matchSeen.has(row.username);
+        // Semua duplikat (justin, kantor/PIC aktif, member lain, atau riwayat matching) dibuang otomatis.
+        if (selfHit || offDup || memberDup || matchHit) { dropped += 1; if (memberDup) droppedMember += 1; return []; }
         return [{ ...row, status: 'clean' as RowStatus, officePics: pics }];
       });
       setRows(kept);
