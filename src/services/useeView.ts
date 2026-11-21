@@ -142,6 +142,42 @@ export function isOfficeDuplicate(pics: string[]): boolean {
   return (pics ?? []).some(pic => !RESIGNED_PICS.includes(pic));
 }
 
+export type OfficeDuplicateResult = { usernames: Set<string>; emails: Set<string> };
+
+/**
+ * Cek duplikat member di kantor: apakah username (id) atau email (contact)
+ * sudah dipakai member lain di tabel es_data_entries (semua namespace).
+ * Read-only. Mengembalikan set username/email yang ketemu.
+ */
+export async function getOfficeDuplicates(usernames: string[], emails: string[]): Promise<OfficeDuplicateResult> {
+  const result: OfficeDuplicateResult = { usernames: new Set(), emails: new Set() };
+  const CHUNK = 80;
+
+  const esc = (v: string) => v.replace(/'/g, "''");
+
+  // Cek username (id) — semua namespace.
+  for (let i = 0; i < usernames.length; i += CHUNK) {
+    const part = usernames.slice(i, i + CHUNK).map(v => v.trim().toLowerCase()).filter(Boolean);
+    if (!part.length) continue;
+    const list = part.map(v => `'${esc(v)}'`).join(',');
+    const sql = `SELECT id FROM usee_workspace.es_data_entries WHERE lower(id) IN (${list}) LIMIT ${CHUNK * 10}`;
+    const rows = await api(`query&sql=${encodeURIComponent(sql)}`);
+    for (const row of rows ?? []) if (row?.id) result.usernames.add(String(row.id).toLowerCase());
+  }
+
+  // Cek email (contact) — semua namespace.
+  for (let i = 0; i < emails.length; i += CHUNK) {
+    const part = emails.slice(i, i + CHUNK).map(v => v.trim().toLowerCase()).filter(Boolean);
+    if (!part.length) continue;
+    const list = part.map(v => `'${esc(v)}'`).join(',');
+    const sql = `SELECT data::jsonb->>'contact' AS email FROM usee_workspace.es_data_entries WHERE lower(data::jsonb->>'contact') IN (${list}) LIMIT ${CHUNK * 10}`;
+    const rows = await api(`query&sql=${encodeURIComponent(sql)}`);
+    for (const row of rows ?? []) if (row?.email) result.emails.add(String(row.email).toLowerCase());
+  }
+
+  return result;
+}
+
 /** Panggil overview (untuk debug / info). */
 export async function getOfficeOverview() {
   return api('overview');

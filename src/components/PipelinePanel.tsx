@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { errorText, savePipelineRows } from '../services/search';
-import { cleanUsername, getOfficePics, isOfficeDuplicate, parseNumber } from '../services/useeView';
+import { cleanUsername, getOfficeDuplicates, getOfficePics, isOfficeDuplicate, parseNumber } from '../services/useeView';
 import { IMPORT_TYPES, REVENUE_SOURCES, type ImportType } from '../config/constants';
 import type { CreatorInput } from '../types';
 import type { Catalog } from '../services/hijack';
@@ -72,6 +72,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
   const [showAll, setShowAll] = useState(false);
   const [droppedCount, setDroppedCount] = useState(0);
   const [emailRows, setEmailRows] = useState<PRow[]>([]);
+  const [memberDupCount, setMemberDupCount] = useState(0);
 
   const emptyRow = (): PRow => ({ username: '', email: '', revenue: '', itemSold: '', followers: '', sourceKol: '' as PRow['sourceKol'], campaign: '', type: 'Listing' as ImportType, status: 'unknown' as RowStatus, officePics: [] as string[] });
 
@@ -106,17 +107,22 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
         for (const r of data ?? []) if (r.normalized_email) selfEmails.add(r.normalized_email);
       }
       const officeMap = await getOfficePics(usernames);
+      // Cek username (id) yang sudah dipakai member lain di kantor (semua namespace).
+      const officeDup = await getOfficeDuplicates(usernames, []);
       let dropped = 0;
+      let droppedMember = 0;
       const kept = rows.flatMap(row => {
         const pics = officeMap[row.username] ?? [];
         const selfHit = selfUsernames.has(row.username) || (row.email && selfEmails.has(row.email));
         const offDup = isOfficeDuplicate(pics);
-        // Semua duplikat (justin maupun kantor/PIC aktif) dibuang otomatis.
-        if (selfHit || offDup) { dropped += 1; return []; }
+        const memberDup = officeDup.usernames.has(row.username);
+        // Semua duplikat (justin, kantor/PIC aktif, atau member lain) dibuang otomatis.
+        if (selfHit || offDup || memberDup) { dropped += 1; if (memberDup) droppedMember += 1; return []; }
         return [{ ...row, status: 'clean' as RowStatus, officePics: pics }];
       });
       setRows(kept);
       setDroppedCount(dropped);
+      setMemberDupCount(droppedMember);
       setChecked(true);
       setNotice('');
     } catch (e) { setError(errorText(e)); } finally { setChecking(false); }
@@ -232,7 +238,21 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
   const save = async () => {
     setBusy(true); setError('');
     try {
-      const toSave: CreatorInput[] = completeRows.map(row => ({
+      // Cek duplikat member (email+username) lewat API kantor sebelum simpan.
+      let memberBlocked = 0;
+      try {
+        const officeDup = await getOfficeDuplicates(
+          completeRows.map(row => row.username),
+          completeRows.map(row => row.email)
+        );
+        const keptRows = completeRows.filter(row => !officeDup.usernames.has(row.username) && !officeDup.emails.has(row.email.toLowerCase()));
+        memberBlocked = completeRows.length - keptRows.length;
+        var finalRows = keptRows;
+      } catch {
+        // Kalau API kantor gagal, tetap lanjut simpan (jangan blokir pipeline).
+        var finalRows = completeRows;
+      }
+      const toSave: CreatorInput[] = finalRows.map(row => ({
         date: recordDate,
         creatorId: '',
         tiktok: `@${row.username}`,
@@ -247,7 +267,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       }));
       if (!toSave.length) { setError('Tidak ada baris lengkap untuk disimpan (semua butuh email + revenue + item sold).'); setBusy(false); return; }
       const result = await savePipelineRows(toSave, done => setProgress({ done, total: toSave.length }));
-      setNotice(`${result.inserted} baru disimpan · ${result.updated} diperbarui.`);
+      setNotice(`${result.inserted} baru disimpan · ${result.updated} diperbarui.${memberBlocked > 0 ? ` · ${memberBlocked} baris dibuang karena email/username sudah dipakai member lain.` : ''}`);
       setRows([]); setEmailRows([]); setStep(0); setProgress({ done: 0, total: 0 });
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
@@ -314,7 +334,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       {step === 1 && (
         <div className="card">
           <h2>2 · Cek Duplikat</h2>
-          <p>Memeriksa terhadap database justin (sendiri) dan kantor (usee-dashboard). Duplikat (justin/kantor PIC aktif) otomatis dibuang; PIC resign (Ichwan/Safaa/Endah/Shafira) tidak dihitung sebagai duplikat.</p>
+          <p>Memeriksa terhadap database justin (sendiri), kantor (usee-dashboard), dan <b>username member lain</b>. Duplikat (justin/kantor PIC aktif/member lain) otomatis dibuang; PIC resign (Ichwan/Safaa/Endah/Shafira) tidak dihitung sebagai duplikat.</p>
           {!checked ? (
             <div className="pipeline-check-cta">
               <p className="muted" style={{ textAlign: 'left', padding: 0 }}>Jalankan untuk membuang baris duplikat sebelum lanjut.</p>
@@ -325,7 +345,8 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
               <div className="pipeline-summary">
                 <span><b>{rows.length}</b> total bersih</span>
               </div>
-              {droppedCount > 0 && <p className="pipeline-notice">🗑️ {droppedCount} duplikat dibuang otomatis (justin/kantor). Sisa semuanya bersih.</p>}
+              {droppedCount > 0 && <p className="pipeline-notice">🗑️ {droppedCount} duplikat dibuang otomatis (justin/kantor/member). Sisa semuanya bersih.</p>}
+              {memberDupCount > 0 && <p className="pipeline-notice">👥 {memberDupCount} username sudah dipakai member lain di kantor, dibuang otomatis.</p>}
               <div className="grid-actions">
                 <button className="secondary" onClick={() => setShowCleanOnly(v => !v)}>{showCleanOnly ? 'Tampilkan semua' : 'Tampilkan hanya bersih'}</button>
                 <button className="secondary" onClick={() => setStep(0)}>« Kembali</button>
