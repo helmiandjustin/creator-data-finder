@@ -96,6 +96,7 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       const emails = rows.map(r => r.email).filter(Boolean);
       const selfUsernames = new Set<string>();
       const selfEmails = new Set<string>();
+      // Data pribadi (1): tabel creators (add records)
       for (let i = 0; i < usernames.length; i += 500) {
         const chunk = usernames.slice(i, i + 500);
         const { data } = await supabase!.from('creators').select('normalized_tiktok,normalized_email').in('normalized_tiktok', chunk);
@@ -104,6 +105,17 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
       for (let i = 0; i < emails.length; i += 500) {
         const chunk = emails.slice(i, i + 500);
         const { data } = await supabase!.from('creators').select('normalized_email').in('normalized_email', chunk);
+        for (const r of data ?? []) if (r.normalized_email) selfEmails.add(r.normalized_email);
+      }
+      // Data pribadi (2): tabel hijack_records (fitur Hijack) — supaya tidak kecolongan
+      for (let i = 0; i < usernames.length; i += 500) {
+        const chunk = usernames.slice(i, i + 500);
+        const { data } = await supabase!.from('hijack_records').select('normalized_tiktok,normalized_email').in('normalized_tiktok', chunk);
+        for (const r of data ?? []) { if (r.normalized_tiktok) selfUsernames.add(r.normalized_tiktok); if (r.normalized_email) selfEmails.add(r.normalized_email); }
+      }
+      for (let i = 0; i < emails.length; i += 500) {
+        const chunk = emails.slice(i, i + 500);
+        const { data } = await supabase!.from('hijack_records').select('normalized_email').in('normalized_email', chunk);
         for (const r of data ?? []) if (r.normalized_email) selfEmails.add(r.normalized_email);
       }
       const officeMap = await getOfficePics(usernames);
