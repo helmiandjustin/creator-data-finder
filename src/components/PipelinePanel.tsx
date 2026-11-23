@@ -493,6 +493,18 @@ export default function PipelinePanel({ catalog }: { catalog?: Catalog | null })
           {showMoreFooter(mergedRows)}
           <div className="grid-actions">
             <button className="secondary" onClick={() => setStep(3)}>« Kembali</button>
+            <button
+              className="secondary"
+              disabled={!completeRows.length}
+              onClick={async () => {
+                const header = ['Username', 'Email', 'Revenue', 'Item sold', 'Followers', 'KOL', 'Campaign', 'Mode'];
+                const lines = completeRows.map(row => [
+                  row.username, row.email, row.revenue, row.itemSold, row.followers, row.sourceKol, row.campaign, row.type,
+                ].join('\t'));
+                const ok = await copyText([header.join('\t'), ...lines].join('\n'));
+                setNotice(ok ? `✅ ${completeRows.length} baris disalin (tab-separated).` : 'Gagal menyalin.');
+              }}
+            >Salin baris siap simpan</button>
             <button onClick={save} disabled={busy}>{busy ? 'Menyimpan…' : `Simpan ${completeRows.length} baris`}</button>
           </div>
         </div>
