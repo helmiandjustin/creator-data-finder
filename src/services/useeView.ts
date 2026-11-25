@@ -1,6 +1,4 @@
-import { RESIGNED_PICS, USEE_DASHBOARD_URL, USEE_PROXY_URL } from '../config/constants';
-
-const USEE_BASE = USEE_PROXY_URL || USEE_DASHBOARD_URL;
+import { RESIGNED_PICS, USEE_DASHBOARD_URL } from '../config/constants';
 
 /**
  * Service untuk membaca data kantor via Edge Function `usee-dashboard`.
@@ -8,7 +6,7 @@ const USEE_BASE = USEE_PROXY_URL || USEE_DASHBOARD_URL;
  */
 
 async function api(params: string): Promise<any> {
-  const response = await fetch(`${USEE_BASE}?__api=${params}`);
+  const response = await fetch(`${USEE_DASHBOARD_URL}?__api=${params}`);
   const json = await response.json();
   if (!response.ok || json?.error) {
     throw new Error(typeof json?.error === 'object' ? json?.error?.type : (json?.error ?? 'Gagal memanggil API kantor.'));
